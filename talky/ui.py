@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
     QFrame,
-    QFormLayout,
     QGraphicsDropShadowEffect,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -69,15 +69,19 @@ QWidget {
 QWidget#RootView {
     background: qlineargradient(
         x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 #ED4A20,
-        stop: 1 #F35B2D
+        stop: 0 #EDEDED,
+        stop: 1 #D9D9D9
     );
-    border: 1px solid rgba(255, 255, 255, 90);
+    border: 1px solid rgba(255, 255, 255, 120);
     border-radius: 24px;
 }
 
 QFrame#GlowLayer {
-    background: rgba(255, 255, 255, 22);
+    background: qlineargradient(
+        x1: 0, y1: 0, x2: 1, y2: 1,
+        stop: 0 rgba(237, 74, 32, 65),
+        stop: 1 rgba(237, 74, 32, 18)
+    );
     border-radius: 20px;
 }
 
@@ -130,20 +134,12 @@ QPushButton {
 }
 
 QPushButton#PrimaryButton {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 #000000,
-        stop: 1 #1A1A1A
-    );
-    color: #ED4A20;
+    background: #ED4A20;
+    color: #000000;
 }
 
 QPushButton#PrimaryButton:hover {
-    background: qlineargradient(
-        x1: 0, y1: 0, x2: 1, y2: 1,
-        stop: 0 #111111,
-        stop: 1 #2A2A2A
-    );
+    background: #F45B2F;
 }
 
 QPushButton#SecondaryButton {
@@ -154,6 +150,22 @@ QPushButton#SecondaryButton {
 
 QPushButton#SecondaryButton:hover {
     background: rgba(255, 255, 255, 255);
+}
+
+QMessageBox {
+    background: #FFFFFF;
+}
+
+QMessageBox QLabel {
+    color: #000000;
+}
+
+QMessageBox QPushButton {
+    background: #FFFFFF;
+    color: #000000;
+    border: 1px solid rgba(0, 0, 0, 45);
+    border-radius: 10px;
+    padding: 6px 12px;
 }
 """
 
@@ -196,13 +208,31 @@ class SettingsWindow(QWidget):
         self.permission_button.setObjectName("SecondaryButton")
         self.permission_button.clicked.connect(self._check_accessibility)
 
-        form = QFormLayout()
-        form.addRow(_tr(self._locale, "Record Hotkey", "hotkey"), self.hotkey_combo)
-        form.addRow(_tr(self._locale, "Whisper Model", "whisper_model"), self.whisper_model_input)
-        form.addRow(_tr(self._locale, "Ollama Model", "ollama_model"), self.ollama_model_input)
-        form.addRow(_tr(self._locale, "ASR Language", "asr_language"), self.language_input)
-        form.addRow(_tr(self._locale, "UI Language", "ui_language"), self.ui_locale_combo)
-        form.addRow(_tr(self._locale, "Auto Paste Delay", "paste_delay"), self.paste_delay_input)
+        form = QGridLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+
+        left_col = [
+            (_tr(self._locale, "Record Hotkey", "hotkey"), self.hotkey_combo),
+            (_tr(self._locale, "Whisper Model", "whisper_model"), self.whisper_model_input),
+            (_tr(self._locale, "ASR Language", "asr_language"), self.language_input),
+        ]
+        right_col = [
+            (_tr(self._locale, "Ollama Model", "ollama_model"), self.ollama_model_input),
+            (_tr(self._locale, "UI Language", "ui_language"), self.ui_locale_combo),
+            (_tr(self._locale, "Auto Paste Delay", "paste_delay"), self.paste_delay_input),
+        ]
+
+        for row, (label_text, widget) in enumerate(left_col):
+            label = QLabel(label_text)
+            label.setObjectName("WindowSubtitle")
+            form.addWidget(label, row, 0)
+            form.addWidget(widget, row, 1)
+        for row, (label_text, widget) in enumerate(right_col):
+            label = QLabel(label_text)
+            label.setObjectName("WindowSubtitle")
+            form.addWidget(label, row, 2)
+            form.addWidget(widget, row, 3)
 
         root = QVBoxLayout()
         root.setContentsMargins(20, 20, 20, 20)
@@ -214,12 +244,7 @@ class SettingsWindow(QWidget):
         container_layout.setContentsMargins(22, 22, 22, 22)
         container_layout.setSpacing(14)
 
-        glow_layer = QFrame(container)
-        glow_layer.setObjectName("GlowLayer")
-        glow_layer.setFixedHeight(96)
-        container_layout.addWidget(glow_layer)
-
-        title = QLabel(_tr(self._locale, "Talky Settings", "settings"))
+        title = QLabel(_tr(self._locale, "Settings", "settings"))
         title.setObjectName("WindowTitle")
         subtitle = QLabel("Glassmorphism panel for dictionary, models, and recording.")
         subtitle.setObjectName("WindowSubtitle")
@@ -232,16 +257,18 @@ class SettingsWindow(QWidget):
         dictionary_layout.addWidget(
             self._card_title(_tr(self._locale, "Shared Dictionary (ASR + LLM)", "shared_dictionary"))
         )
+        self.dictionary_edit.setMinimumHeight(230)
         dictionary_layout.addWidget(self.dictionary_edit)
 
         settings_card = self._build_glass_card()
+        settings_card.setMaximumHeight(210)
         settings_layout = QVBoxLayout(settings_card)
         settings_layout.setContentsMargins(16, 14, 16, 14)
         settings_layout.addWidget(self._card_title(_tr(self._locale, "Base Parameters", "base_params")))
         settings_layout.addLayout(form)
 
-        container_layout.addWidget(dictionary_card)
-        container_layout.addWidget(settings_card)
+        container_layout.addWidget(dictionary_card, 1)
+        container_layout.addWidget(settings_card, 0)
 
         button_row = QHBoxLayout()
         button_row.addWidget(self.permission_button)
@@ -306,11 +333,6 @@ class SettingsWindow(QWidget):
     def _build_glass_card(self) -> QFrame:
         card = QFrame()
         card.setObjectName("GlassCard")
-        shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(32)
-        shadow.setOffset(0, 10)
-        shadow.setColor(Qt.GlobalColor.gray)
-        card.setGraphicsEffect(shadow)
         return card
 
     def _card_title(self, text: str) -> QLabel:
