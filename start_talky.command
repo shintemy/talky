@@ -7,7 +7,7 @@ cd "$PROJECT_DIR"
 echo "==> Talky one-click start"
 
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "Error: python3 is not installed."
+  echo "Error: python3 is not installed. Please install Python 3 first."
   exit 1
 fi
 
@@ -28,7 +28,8 @@ if [[ ! -d "local_whisper_model" ]]; then
 fi
 
 if ! command -v ollama >/dev/null 2>&1; then
-  echo "Error: ollama command not found. Install Ollama first."
+  echo "Error: ollama command not found."
+  echo "Please install Ollama first: https://ollama.com/download"
   exit 1
 fi
 
