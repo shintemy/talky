@@ -1,0 +1,12 @@
+PyQt6
+pynput
+sounddevice
+soundfile
+numpy
+mlx-whisper
+ollama
+pyperclip
+pypinyin
+pyobjc-framework-ApplicationServices
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
