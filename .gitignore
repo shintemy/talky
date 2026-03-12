@@ -10,3 +10,4 @@ local_whisper_model/
 .cursor_updates.md
 tests/pics.iconset/
 tests/pics_valid.iconset/
+history/

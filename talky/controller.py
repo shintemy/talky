@@ -17,6 +17,7 @@ from talky.dictionary_entries import (
 )
 from talky.focus import get_frontmost_app, has_focus_target
 from talky.hotkey import HoldToTalkHotkey
+from talky.history_store import HistoryStore
 from talky.llm_service import OllamaTextCleaner
 from talky.models import AppSettings
 from talky.paster import ClipboardPaster
@@ -48,6 +49,9 @@ class AppController(QObject):
         )
         self.llm = OllamaTextCleaner(model_name=self.settings.ollama_model)
         self.paster = ClipboardPaster(paste_delay_ms=self.settings.auto_paste_delay_ms)
+        self.history_store = HistoryStore(
+            Path(__file__).resolve().parent.parent / "history"
+        )
 
         self._is_processing = False
         self._is_recording = False
@@ -171,6 +175,8 @@ class AppController(QObject):
             if not final_text:
                 raise RuntimeError("LLM returned empty text. Please retry.")
             print(f"[Talky] Final text: {final_text}")
+            history_path = self.history_store.append(final_text)
+            print(f"[Talky] History appended: {history_path}")
 
             current_front_app = get_frontmost_app()
             if has_focus_target(current_front_app):
