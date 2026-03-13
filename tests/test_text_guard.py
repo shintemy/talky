@@ -65,3 +65,17 @@ def test_enforce_source_boundaries_preserves_question_intent() -> None:
     corrected = enforce_source_boundaries(source, output)
 
     assert corrected == source
+
+
+def test_enforce_source_boundaries_blocks_question_to_markdown_outline() -> None:
+    source = "如何检测每次开启服务时它是否有去检查版本更新？"
+    output = (
+        "### 检测服务启动时的更新行为\n\n"
+        "- 观察启动日志，查看是否输出检查更新提示。\n"
+        "- 分析代码逻辑，确认是否调用更新接口。\n"
+        "- 验证网络请求，监测是否访问更新服务。"
+    )
+
+    corrected = enforce_source_boundaries(source, output)
+
+    assert corrected == source

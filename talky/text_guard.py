@@ -142,5 +142,28 @@ def _looks_like_question(text: str) -> bool:
     )
     if lower.startswith(prefixes):
         return True
-    cn_markers = ("吗", "么", "呢", "是否", "能否", "可否", "是不是")
-    return any(marker in value for marker in cn_markers)
+    # Chinese question heuristics:
+    # - keep this strict to avoid false positives like declarative bullets
+    #   that happen to contain "是否".
+    if value.endswith(("吗", "么", "呢")):
+        return True
+    cn_prefixes = (
+        "如何",
+        "怎么",
+        "怎样",
+        "为什么",
+        "为何",
+        "是否",
+        "能否",
+        "可否",
+        "是不是",
+        "有无",
+        "有没有",
+        "哪些",
+        "哪里",
+        "哪儿",
+        "多少",
+        "几",
+    )
+    stripped = value.lstrip("“\"'（(")
+    return stripped.startswith(cn_prefixes)
