@@ -21,6 +21,90 @@ Prerequisites (install manually first):
 For a better one-click experience, wrap the script as `Talky Launcher.app`
 with Script Editor / Automator, then pin it to Dock and apply a custom icon.
 
+**First-Run Language:** [English](#first-run-guide-en) | [中文](#首次安装与权限引导中文)
+
+## First-Run Guide (EN)
+
+### Checklist
+
+Before launching Talky, make sure these are ready:
+- Python 3 is installed
+- Ollama is installed and available in Terminal
+- A compatible local Ollama model is pulled (user-selected)
+
+Quick checks:
+```bash
+python3 --version
+ollama --version
+ollama list
+```
+
+If your model is not listed yet:
+```bash
+ollama pull <your-model>
+```
+
+### Permissions (Required on first run)
+
+Talky needs two macOS permissions:
+1. Microphone  
+   `System Settings -> Privacy & Security -> Microphone`
+2. Accessibility  
+   `System Settings -> Privacy & Security -> Accessibility`
+
+Without these permissions, recording or auto-paste may fail.
+
+### 60-Second First Run
+
+1. Open Terminal in the project root
+2. Run `chmod +x start_talky.command` (first time only)
+3. Run `./start_talky.command`
+4. Hold hotkey to speak, release to process
+5. Confirm output is pasted into the focused input box
+
+If no focus target is detected, Talky shows a floating copy panel.
+
+## 首次安装与权限引导（中文）
+
+### 准备清单
+
+启动 Talky 前，请先确认：
+- 已安装 Python 3
+- 已安装 Ollama，且可在 Terminal 中直接调用
+- 已拉取一个你自行选择的兼容本地 Ollama 模型
+
+快速检查命令：
+```bash
+python3 --version
+ollama --version
+ollama list
+```
+
+若 `ollama list` 中还没有目标模型，请先拉取：
+```bash
+ollama pull <your-model>
+```
+
+### 首次权限（必须）
+
+Talky 首次使用需要两个 macOS 权限：
+1. 麦克风  
+   `系统设置 -> 隐私与安全性 -> 麦克风`
+2. 辅助功能  
+   `系统设置 -> 隐私与安全性 -> 辅助功能`
+
+若未授权，录音或自动粘贴可能失败。
+
+### 60 秒首启流程
+
+1. 在项目根目录打开 Terminal
+2. 首次执行 `chmod +x start_talky.command`
+3. 执行 `./start_talky.command`
+4. 按住热键说话，松开后处理
+5. 确认文本已粘贴到当前聚焦输入框
+
+若没有可用焦点，Talky 会显示悬浮复制面板。
+
 ## Core Flow
 
 1. Hold hotkey to record
@@ -36,7 +120,7 @@ Every generated output is appended to a daily markdown file:
 
 ## Vision
 
-**Language:** [English](#vision-en) | [中文](#vision-cn)
+**Vision Language:** [English](#vision-en) | [中文](#vision-cn)
 
 ### Vision En
 
