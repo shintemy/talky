@@ -24,5 +24,7 @@ def test_build_llm_prompt_includes_required_rules() -> None:
     assert "structure it with short headers" in prompt
     assert "Dictionary is correction-only" in prompt
     assert "You are not a QA assistant" in prompt
+    assert "NEVER provide suggestions" in prompt
+    assert "strictly bounded to source content" in prompt
     assert "TensorRT" in prompt
     assert "Alice Huang" in prompt

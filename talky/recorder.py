@@ -15,6 +15,7 @@ class AudioRecorder:
         self.channels = channels
         self._stream: sd.InputStream | None = None
         self._chunks: list[np.ndarray] = []
+        self._active_sample_rate = float(sample_rate)
 
     @property
     def is_recording(self) -> bool:
@@ -32,24 +33,51 @@ class AudioRecorder:
                 pass
             self._chunks.append(indata.copy())
 
-        try:
-            self._stream = self._open_input_stream(_callback)
-            self._stream.start()
-        except sd.PortAudioError as exc:
-            if not self._is_recoverable_portaudio_error(exc):
-                raise
-            self._reset_portaudio()
-            time.sleep(0.2)
-            self._stream = self._open_input_stream(_callback)
-            self._stream.start()
+        sample_rates = [float(self.sample_rate), self._default_input_sample_rate()]
+        # De-duplicate while keeping order.
+        unique_rates: list[float] = []
+        for rate in sample_rates:
+            if rate not in unique_rates:
+                unique_rates.append(rate)
 
-    def _open_input_stream(self, callback):
+        last_exc: sd.PortAudioError | None = None
+        for sample_rate in unique_rates:
+            for retry in range(3):
+                try:
+                    self._stream = self._open_input_stream(_callback, sample_rate=sample_rate)
+                    self._stream.start()
+                    self._active_sample_rate = float(sample_rate)
+                    return
+                except sd.PortAudioError as exc:
+                    last_exc = exc
+                    if not self._is_recoverable_portaudio_error(exc):
+                        raise
+                    self._reset_portaudio()
+                    time.sleep(0.2 + (retry * 0.1))
+                    continue
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Failed to open input stream.")
+
+    def _open_input_stream(self, callback, sample_rate: float):
         return sd.InputStream(
-            samplerate=self.sample_rate,
+            samplerate=sample_rate,
             channels=self.channels,
             dtype="float32",
             callback=callback,
         )
+
+    def _default_input_sample_rate(self) -> float:
+        try:
+            default_input = sd.query_devices(kind="input")
+            if isinstance(default_input, dict):
+                value = default_input.get("default_samplerate")
+                if value:
+                    return float(value)
+        except Exception:
+            pass
+        return float(self.sample_rate)
 
     def _is_recoverable_portaudio_error(self, exc: sd.PortAudioError) -> bool:
         message = str(exc).lower()
@@ -89,6 +117,6 @@ class AudioRecorder:
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         path = Path(tmp.name)
         tmp.close()
-        sf.write(path, audio, self.sample_rate)
+        sf.write(path, audio, int(round(self._active_sample_rate)))
         self._chunks.clear()
         return path

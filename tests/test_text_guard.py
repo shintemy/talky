@@ -1,4 +1,8 @@
-from talky.text_guard import collapse_duplicate_output, enforce_pronoun_consistency
+from talky.text_guard import (
+    collapse_duplicate_output,
+    enforce_pronoun_consistency,
+    enforce_source_boundaries,
+)
 
 
 def test_enforce_pronoun_consistency_my_to_your() -> None:
@@ -34,3 +38,30 @@ def test_collapse_duplicate_output_repeated_lines() -> None:
     collapsed = collapse_duplicate_output(text)
 
     assert collapsed == "Do you hear the people sing?"
+
+
+def test_enforce_source_boundaries_blocks_introduced_advice() -> None:
+    source = "明天上线发布功能，检查接口和文档。"
+    output = "建议你先做灰度发布，再加回滚方案和沟通清单。"
+
+    corrected = enforce_source_boundaries(source, output)
+
+    assert corrected == source
+
+
+def test_enforce_source_boundaries_keeps_faithful_rewrite() -> None:
+    source = "明天上线发布功能，检查接口和文档。"
+    output = "明天上线发布该功能，并检查接口与文档。"
+
+    corrected = enforce_source_boundaries(source, output)
+
+    assert corrected == output
+
+
+def test_enforce_source_boundaries_preserves_question_intent() -> None:
+    source = "How is everything?"
+    output = "Everything is great."
+
+    corrected = enforce_source_boundaries(source, output)
+
+    assert corrected == source
