@@ -7,6 +7,8 @@ It captures voice with a hold-to-talk workflow, runs ASR + LLM locally, and outp
 
 **Language:** English | [中文](README.zh.md)
 
+Logo file: [`assets/talky-logo.png`](assets/talky-logo.png)
+
 ### 1) Product Highlights and Core Flow
 
 **Highlights**

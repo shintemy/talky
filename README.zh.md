@@ -7,6 +7,8 @@ Talky 是一个面向 macOS（Apple Silicon）的本地语音输入助手。
 
 **语言 / Language:** [English](README.md) | 中文
 
+Logo 文件：[`assets/talky-logo.png`](assets/talky-logo.png)
+
 ### 1）产品卖点与核心操作流程
 
 **产品卖点**
