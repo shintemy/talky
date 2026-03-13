@@ -13,6 +13,7 @@ class AppSettings:
     ui_locale: str = "en"  # "en" or "mixed"
     language: str = "zh"
     auto_paste_delay_ms: int = 120
+    llm_debug_stream: bool = False
     sample_rate: int = 16000
     channels: int = 1
 
@@ -28,6 +29,7 @@ class AppSettings:
             ui_locale=str(data.get("ui_locale", "en")),
             language=str(data.get("language", "zh")),
             auto_paste_delay_ms=int(data.get("auto_paste_delay_ms", 120)),
+            llm_debug_stream=bool(data.get("llm_debug_stream", False)),
             sample_rate=int(data.get("sample_rate", 16000)),
             channels=int(data.get("channels", 1)),
         )

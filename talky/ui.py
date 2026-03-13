@@ -5,6 +5,7 @@ from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -41,6 +42,7 @@ _ZH = {
     "asr_language": "ASR \u8bed\u8a00",
     "ui_language": "UI \u8bed\u8a00",
     "paste_delay": "\u7c98\u8d34\u5ef6\u8fdf",
+    "llm_debug_stream": "LLM \u8c03\u8bd5\u6d41\u8f93\u51fa",
     "saved": "\u5df2\u4fdd\u5b58",
     "access_granted": "\u65e0\u969c\u788d\u6743\u9650\u5df2\u5f00\u542f",
     "access_missing": "\u9700\u8981\u65e0\u969c\u788d\u6743\u9650",
@@ -197,6 +199,7 @@ class SettingsWindow(QWidget):
         self.paste_delay_input = QSpinBox()
         self.paste_delay_input.setRange(50, 2000)
         self.paste_delay_input.setSuffix(" ms")
+        self.llm_debug_stream_checkbox = QCheckBox()
 
         self.save_button = QPushButton(_tr(self._locale, "Save", "save"))
         self.save_button.setObjectName("PrimaryButton")
@@ -221,6 +224,10 @@ class SettingsWindow(QWidget):
             (_tr(self._locale, "Ollama Model", "ollama_model"), self.ollama_model_input),
             (_tr(self._locale, "UI Language", "ui_language"), self.ui_locale_combo),
             (_tr(self._locale, "Auto Paste Delay", "paste_delay"), self.paste_delay_input),
+            (
+                _tr(self._locale, "LLM Debug Stream", "llm_debug_stream"),
+                self.llm_debug_stream_checkbox,
+            ),
         ]
 
         for row, (label_text, widget) in enumerate(left_col):
@@ -292,6 +299,7 @@ class SettingsWindow(QWidget):
         locale_idx = self.ui_locale_combo.findData(settings.ui_locale)
         self.ui_locale_combo.setCurrentIndex(0 if locale_idx < 0 else locale_idx)
         self.paste_delay_input.setValue(settings.auto_paste_delay_ms)
+        self.llm_debug_stream_checkbox.setChecked(settings.llm_debug_stream)
 
     def _save_settings(self) -> None:
         terms = [
@@ -307,6 +315,7 @@ class SettingsWindow(QWidget):
             ui_locale=str(self.ui_locale_combo.currentData()),
             language=self.language_input.text().strip() or "zh",
             auto_paste_delay_ms=self.paste_delay_input.value(),
+            llm_debug_stream=self.llm_debug_stream_checkbox.isChecked(),
             sample_rate=self.controller.settings.sample_rate,
             channels=self.controller.settings.channels,
         )

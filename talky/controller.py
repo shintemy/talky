@@ -51,7 +51,10 @@ class AppController(QObject):
             model_name=self.settings.whisper_model,
             language=self.settings.language,
         )
-        self.llm = OllamaTextCleaner(model_name=self.settings.ollama_model)
+        self.llm = OllamaTextCleaner(
+            model_name=self.settings.ollama_model,
+            debug_stream=self.settings.llm_debug_stream,
+        )
         self.paster = ClipboardPaster(paste_delay_ms=self.settings.auto_paste_delay_ms)
         self.history_store = HistoryStore(
             Path(__file__).resolve().parent.parent / "history"
@@ -93,7 +96,10 @@ class AppController(QObject):
             model_name=self.settings.whisper_model,
             language=self.settings.language,
         )
-        self.llm = OllamaTextCleaner(model_name=self.settings.ollama_model)
+        self.llm = OllamaTextCleaner(
+            model_name=self.settings.ollama_model,
+            debug_stream=self.settings.llm_debug_stream,
+        )
         self.paster = ClipboardPaster(paste_delay_ms=self.settings.auto_paste_delay_ms)
 
     def _start_hotkey(self) -> None:

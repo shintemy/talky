@@ -32,6 +32,45 @@ def test_clean_uses_content_stream_when_available() -> None:
     assert result == "整理后文本"
 
 
+def test_clean_is_silent_by_default(capsys: pytest.CaptureFixture[str]) -> None:
+    def chat_impl(**kwargs):  # noqa: ANN003
+        del kwargs
+        return [
+            {"message": {"content": "整理后", "thinking": "internal"}},
+            {"message": {"content": "文本", "thinking": ""}},
+        ]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+
+    result = cleaner.clean(raw_text="原始文本", dictionary_terms=[])
+
+    captured = capsys.readouterr()
+    assert result == "整理后文本"
+    assert captured.out == ""
+
+
+def test_clean_prints_stream_when_debug_enabled(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def chat_impl(**kwargs):  # noqa: ANN003
+        del kwargs
+        return [
+            {"message": {"content": "整理后", "thinking": "internal"}},
+            {"message": {"content": "文本", "thinking": ""}},
+        ]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy", debug_stream=True)
+
+    result = cleaner.clean(raw_text="原始文本", dictionary_terms=[])
+
+    captured = capsys.readouterr()
+    assert result == "整理后文本"
+    assert "internal" in captured.out
+    assert "整理后文本" in captured.out
+
+
 def test_clean_never_returns_thinking_fallback() -> None:
     def chat_impl(**kwargs):  # noqa: ANN003
         del kwargs
