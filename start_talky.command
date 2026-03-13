@@ -44,25 +44,57 @@ fi
 MODEL_NAME="$(
 python - <<'PY'
 import json
+import subprocess
 from pathlib import Path
 
-default_model = "qwen3.5:9b"
 config_path = Path.home() / ".talky" / "settings.json"
-if not config_path.exists():
-    print(default_model)
-else:
+data = {}
+if config_path.exists():
     try:
         data = json.loads(config_path.read_text(encoding="utf-8"))
-        print(str(data.get("ollama_model", default_model)))
     except Exception:
-        print(default_model)
+        data = {}
+
+configured = str(data.get("ollama_model", "")).strip()
+
+installed: list[str] = []
+try:
+    raw = subprocess.check_output(["ollama", "list"], text=True)
+    for line in raw.splitlines()[1:]:
+        line = line.strip()
+        if not line:
+            continue
+        name = line.split()[0].strip()
+        if name:
+            installed.append(name)
+except Exception:
+    installed = []
+
+selected = ""
+if configured and configured in installed:
+    selected = configured
+elif installed:
+    selected = installed[0]
+    data["ollama_model"] = selected
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+print(selected)
 PY
 )"
 
-if ! ollama show "$MODEL_NAME" >/dev/null 2>&1; then
-  echo "==> Pulling Ollama model: $MODEL_NAME"
-  ollama pull "$MODEL_NAME"
+if [[ -z "$MODEL_NAME" ]]; then
+  echo "Error: no Ollama model found."
+  echo "Please pull any model first, for example:"
+  echo "  ollama pull <your-model>"
+  echo "Then re-run start_talky.command."
+  exit 1
 fi
+
+echo "==> Using Ollama model: $MODEL_NAME"
 
 echo "==> Launching Talky..."
 exec python main.py

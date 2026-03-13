@@ -44,6 +44,10 @@ If your model is not listed yet:
 ollama pull <your-model>
 ```
 
+Talky uses your configured model in `~/.talky/settings.json` (`ollama_model`).
+If no model is configured yet, `start_talky.command` will use the first model
+already available in your local `ollama list`.
+
 ### Permissions (Required on first run)
 
 Talky needs two macOS permissions:
@@ -84,6 +88,10 @@ ollama list
 ```bash
 ollama pull <your-model>
 ```
+
+Talky 会优先使用 `~/.talky/settings.json` 中配置的 `ollama_model`。
+若尚未配置模型，`start_talky.command` 会自动使用你本机 `ollama list`
+里已存在的第一个模型。
 
 ### 首次权限（必须）
 

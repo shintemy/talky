@@ -50,5 +50,6 @@ class OllamaTextCleaner:
         final = "".join(parts).strip()
         if final:
             return final
-        # Fallback: some models may return only thinking field.
-        return "".join(thinking_parts).strip()
+        # Never surface model thinking as final content.
+        # If content stream is empty, preserve the source transcript instead.
+        return raw_text.strip()

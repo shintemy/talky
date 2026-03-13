@@ -24,7 +24,11 @@ from talky.paster import ClipboardPaster
 from talky.permissions import check_ollama_reachable
 from talky.prompting import build_asr_initial_prompt
 from talky.recorder import AudioRecorder
-from talky.text_guard import collapse_duplicate_output, enforce_pronoun_consistency
+from talky.text_guard import (
+    collapse_duplicate_output,
+    enforce_pronoun_consistency,
+    enforce_source_boundaries,
+)
 
 
 class AppController(QObject):
@@ -174,6 +178,7 @@ class AppController(QObject):
             final_text = apply_phonetic_dictionary(final_text, dict_terms)
             final_text = normalize_person_pronouns(final_text, person_terms)
             final_text = enforce_pronoun_consistency(corrected_raw_text, final_text)
+            final_text = enforce_source_boundaries(corrected_raw_text, final_text)
             final_text = collapse_duplicate_output(final_text)
             if not final_text:
                 raise RuntimeError("LLM returned empty text. Please retry.")
