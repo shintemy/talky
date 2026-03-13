@@ -99,6 +99,11 @@ chmod +x start_talky.command
 ./start_talky.command
 ```
 
+Optional launcher app:
+- Use `talky_launcher.applescript` in this repo as a template.
+- Replace `set scriptPath to "/path/to/start_talky.command"` with your local path.
+- Export it as an app in Script Editor, then pin to Dock if needed.
+
 Then grant macOS permissions:
 - `System Settings -> Privacy & Security -> Microphone`
 - `System Settings -> Privacy & Security -> Accessibility`

@@ -6,6 +6,33 @@ cd "$PROJECT_DIR"
 
 echo "==> Talky one-click start"
 
+print_repo_version() {
+  if ! command -v git >/dev/null 2>&1; then
+    echo "==> Version: unknown (git not found)"
+    return
+  fi
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "==> Version: unknown (not a git repo)"
+    return
+  fi
+
+  local commit_id commit_date
+  commit_id="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  commit_date="$(
+    git show -s --date=format:%Y-%m-%d --format=%cd HEAD 2>/dev/null || true
+  )"
+
+  if [[ -n "$commit_id" && -n "$commit_date" ]]; then
+    echo "==> Version: ${commit_date}+${commit_id}"
+    return
+  fi
+  if [[ -n "$commit_id" ]]; then
+    echo "==> Version: unknown-date+${commit_id}"
+    return
+  fi
+  echo "==> Version: unknown"
+}
+
 auto_update_repo() {
   if ! command -v git >/dev/null 2>&1; then
     return
@@ -45,7 +72,10 @@ auto_update_repo() {
   echo "==> Auto-update failed. Continue with local code."
 }
 
+print_repo_version
 auto_update_repo
+echo "==> Running version after update check:"
+print_repo_version
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "Error: python3 is not installed. Please install Python 3 first."

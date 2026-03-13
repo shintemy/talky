@@ -99,6 +99,11 @@ chmod +x start_talky.command
 ./start_talky.command
 ```
 
+可选启动器 App：
+- 仓库已提供 `talky_launcher.applescript` 模板。
+- 将其中 `set scriptPath to "/path/to/start_talky.command"` 改为你本机路径。
+- 用 Script Editor 导出为 App 后，可固定到 Dock 使用。
+
 然后在 macOS 中授权：
 - `系统设置 -> 隐私与安全性 -> 麦克风`
 - `系统设置 -> 隐私与安全性 -> 辅助功能`

@@ -16,24 +16,15 @@ def test_build_llm_prompt_includes_required_rules() -> None:
 
     prompt = build_llm_system_prompt(dictionary)
 
-    assert "Remove filler words" in prompt
-    assert "Convert spoken style to written style" in prompt
-    assert "Output only the cleaned result" in prompt
-    assert "Preserve original pronouns and perspective" in prompt
-    assert "Preserve the source language" in prompt
+    assert "Remove fillers and obvious ASR noise" in prompt
+    assert "Rewrite only" in prompt
+    assert "Keep the source language" in prompt
     assert "Do not translate" in prompt
-    assert "Enforce high scannability" in prompt
-    assert "blank lines between blocks" in prompt
-    assert "clear section headers" in prompt
-    assert "grammatical form consistent" in prompt
-    assert "similar in length" in prompt
-    assert "symptom-cause-action" in prompt
-    assert "ordered or unordered lists" in prompt
-    assert "keep one natural paragraph" in prompt
-    assert "structure it with short headers" in prompt
-    assert "Dictionary is correction-only" in prompt
+    assert "Short question input -> output exactly one question sentence" in prompt
     assert "You are not a QA assistant" in prompt
-    assert "NEVER provide suggestions" in prompt
-    assert "strictly bounded to source content" in prompt
+    assert "Dictionary is correction-only" in prompt
+    assert "clear section headers/lists" in prompt
+    assert "grammar form consistent" in prompt
+    assert "Output only the cleaned result" in prompt
     assert "TensorRT" in prompt
     assert "Alice Huang" in prompt
