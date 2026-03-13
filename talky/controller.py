@@ -229,4 +229,4 @@ class AppController(QObject):
             warm_llm_elapsed = time.perf_counter() - warm_llm_start
             print(f"[Talky] Ollama warm-up done: {warm_llm_elapsed:.2f}s")
         except Exception as exc:
-            print(f"[Talky] Ollama warm-up failed: {exc}")
+            print(f"[Talky][debug] Ollama warm-up skipped: {exc}")

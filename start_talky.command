@@ -18,9 +18,72 @@ fi
 
 source ".venv/bin/activate"
 
-echo "==> Installing dependencies..."
-python -m pip install --upgrade pip >/dev/null
-python -m pip install -r requirements.txt >/dev/null
+deps_ready() {
+  python - <<'PY'
+import importlib
+import sys
+
+required = [
+    "PyQt6",
+    "pynput",
+    "sounddevice",
+    "soundfile",
+    "numpy",
+    "mlx_whisper",
+    "ollama",
+    "pyperclip",
+]
+missing = [name for name in required if importlib.util.find_spec(name) is None]
+if missing:
+    print("Missing modules:", ", ".join(missing))
+    sys.exit(1)
+PY
+}
+
+ensure_dependencies() {
+  local dep_marker=".venv/.deps_ok"
+  local dep_state
+  dep_state="$(
+    python - <<'PY'
+from pathlib import Path
+import hashlib
+import sys
+
+req = Path("requirements.txt")
+text = req.read_text(encoding="utf-8") if req.exists() else ""
+digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+print(f"{sys.version_info.major}.{sys.version_info.minor}-{digest}")
+PY
+  )"
+
+  if [[ -f "$dep_marker" ]] && [[ "$(cat "$dep_marker" 2>/dev/null)" == "$dep_state" ]]; then
+    return
+  fi
+
+  if deps_ready; then
+    echo "$dep_state" > "$dep_marker"
+    return
+  fi
+
+  echo "==> Installing dependencies (network required)..."
+  if python -m pip install --retries 3 --timeout 30 -r requirements.txt; then
+    echo "$dep_state" > "$dep_marker"
+    return
+  fi
+
+  echo "Warning: dependency installation failed."
+  if deps_ready; then
+    echo "==> Existing local dependencies are usable. Continuing..."
+    echo "$dep_state" > "$dep_marker"
+    return
+  fi
+
+  echo "Error: required dependencies are missing and could not be installed."
+  echo "Please check your network and re-run start_talky.command."
+  exit 1
+}
+
+ensure_dependencies
 
 if [[ ! -d "local_whisper_model" ]]; then
   echo "==> local_whisper_model not found, downloading..."
