@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -31,13 +32,47 @@ class AudioRecorder:
                 pass
             self._chunks.append(indata.copy())
 
-        self._stream = sd.InputStream(
+        try:
+            self._stream = self._open_input_stream(_callback)
+            self._stream.start()
+        except sd.PortAudioError as exc:
+            if not self._is_recoverable_portaudio_error(exc):
+                raise
+            self._reset_portaudio()
+            time.sleep(0.2)
+            self._stream = self._open_input_stream(_callback)
+            self._stream.start()
+
+    def _open_input_stream(self, callback):
+        return sd.InputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
             dtype="float32",
-            callback=_callback,
+            callback=callback,
         )
-        self._stream.start()
+
+    def _is_recoverable_portaudio_error(self, exc: sd.PortAudioError) -> bool:
+        message = str(exc).lower()
+        return (
+            "-10851" in message
+            or "invalid property value" in message
+            or "auhal" in message
+            or "!obj" in message
+        )
+
+    def _reset_portaudio(self) -> None:
+        terminate = getattr(sd, "_terminate", None)
+        initialize = getattr(sd, "_initialize", None)
+        if callable(terminate):
+            try:
+                terminate()
+            except Exception:
+                pass
+        if callable(initialize):
+            try:
+                initialize()
+            except Exception:
+                pass
 
     def stop_and_dump_wav(self) -> Path:
         if self._stream is None:
