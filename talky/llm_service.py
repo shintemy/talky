@@ -10,8 +10,9 @@ from talky.prompting import build_llm_system_prompt
 
 
 class OllamaTextCleaner:
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, model_name: str, debug_stream: bool = False) -> None:
         self.model_name = model_name
+        self.debug_stream = debug_stream
 
     def warm_up(self) -> None:
         self._chat_with_fallback(
@@ -43,12 +44,15 @@ class OllamaTextCleaner:
             piece = message.get("content", "") or ""
             thinking_piece = message.get("thinking", "") or ""
             if thinking_piece:
-                print(thinking_piece, end="", flush=True)
+                if self.debug_stream:
+                    print(thinking_piece, end="", flush=True)
                 thinking_parts.append(thinking_piece)
             if piece:
-                print(piece, end="", flush=True)
+                if self.debug_stream:
+                    print(piece, end="", flush=True)
                 parts.append(piece)
-        print()
+        if self.debug_stream:
+            print()
         final = "".join(parts).strip()
         if final:
             return final
