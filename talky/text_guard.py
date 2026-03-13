@@ -67,3 +67,80 @@ def collapse_duplicate_output(text: str) -> str:
             return lines[0] if lines else stripped[: len(stripped) // 2].strip()
 
     return stripped
+
+
+def enforce_source_boundaries(source_text: str, output_text: str) -> str:
+    """
+    Prevent output from drifting into advice/extra-generation mode.
+    If advisory markers appear only in output and it expands content notably,
+    fallback to source text.
+    """
+    source = source_text.strip()
+    output = output_text.strip()
+    if not source or not output:
+        return output_text
+
+    advisory_markers = (
+        "建议",
+        "你可以",
+        "可以考虑",
+        "推荐",
+        "应该",
+        "方案",
+        "步骤",
+        "总结",
+        "结论",
+        "i suggest",
+        "you should",
+        "i recommend",
+        "consider",
+    )
+    source_l = source.lower()
+    output_l = output.lower()
+
+    # Preserve question intent: source question should remain a question.
+    source_is_question = _looks_like_question(source)
+    output_is_question = _looks_like_question(output)
+    if source_is_question and not output_is_question:
+        return source
+
+    introduced = any((m in output_l) and (m not in source_l) for m in advisory_markers)
+    expanded = len(output) >= (len(source) + 8)
+    starts_with_advice = output_l.startswith(("建议", "你可以", "可以考虑", "i suggest", "you should"))
+    if introduced and (expanded or starts_with_advice):
+        return source
+    return output
+
+
+def _looks_like_question(text: str) -> bool:
+    value = text.strip()
+    if not value:
+        return False
+    if value.endswith("?") or value.endswith("？"):
+        return True
+    lower = value.lower()
+    prefixes = (
+        "how ",
+        "what ",
+        "why ",
+        "when ",
+        "where ",
+        "who ",
+        "which ",
+        "can ",
+        "could ",
+        "would ",
+        "should ",
+        "do ",
+        "does ",
+        "did ",
+        "is ",
+        "are ",
+        "am ",
+        "was ",
+        "were ",
+    )
+    if lower.startswith(prefixes):
+        return True
+    cn_markers = ("吗", "么", "呢", "是否", "能否", "可否", "是不是")
+    return any(marker in value for marker in cn_markers)
