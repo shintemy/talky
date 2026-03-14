@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QScrollArea,
     QTextEdit,
     QSpinBox,
     QStyle,
@@ -65,12 +66,14 @@ _ZH = {
     "granted": "\u5df2\u6388\u6743",
     "not_granted": "\u672a\u6388\u6743",
     "request_mic_permission": "\u8bf7\u6c42\u9ea6\u514b\u98ce\u6743\u9650",
+    "ui_option_english": "\u82f1\u6587",
+    "ui_option_chinese": "\u4e2d\u6587",
 }
 
 
 def _tr(locale: str, en: str, key: str | None = None) -> str:
     if locale == "mixed" and key:
-        return f"{en} ({_ZH[key]})"
+        return _ZH.get(key, en)
     return en
 
 
@@ -128,6 +131,38 @@ QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QTextEdit {
     background: rgba(255, 255, 255, 250);
     padding: 8px 10px;
     selection-background-color: rgba(237, 74, 32, 145);
+}
+
+QComboBox#InsetIconField {
+    padding-right: 34px;
+}
+
+QComboBox#InsetIconField::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 18px;
+    right: 8px;
+    border: none;
+}
+
+QSpinBox#InsetStepperField {
+    padding-right: 34px;
+}
+
+QSpinBox#InsetStepperField::up-button,
+QSpinBox#InsetStepperField::down-button {
+    subcontrol-origin: padding;
+    width: 16px;
+    right: 8px;
+    border: none;
+}
+
+QSpinBox#InsetStepperField::up-button {
+    subcontrol-position: top right;
+}
+
+QSpinBox#InsetStepperField::down-button {
+    subcontrol-position: bottom right;
 }
 
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPlainTextEdit:focus, QTextEdit:focus {
@@ -200,6 +235,7 @@ class SettingsWindow(QWidget):
         )
 
         self.hotkey_combo = QComboBox()
+        self.hotkey_combo.setObjectName("InsetIconField")
         self.hotkey_combo.addItem("Fn / Globe (Primary)", userData="fn")
         self.hotkey_combo.addItem("Right Option (Fallback)", userData="right_option")
 
@@ -209,9 +245,15 @@ class SettingsWindow(QWidget):
         self.ollama_host_input.setPlaceholderText("http://127.0.0.1:11434")
         self.language_input = QLineEdit()
         self.ui_locale_combo = QComboBox()
-        self.ui_locale_combo.addItem("English", userData="en")
-        self.ui_locale_combo.addItem("Chinese", userData="mixed")
+        self.ui_locale_combo.setObjectName("InsetIconField")
+        self.ui_locale_combo.addItem(
+            _tr(self._locale, "English", "ui_option_english"), userData="en"
+        )
+        self.ui_locale_combo.addItem(
+            _tr(self._locale, "Chinese", "ui_option_chinese"), userData="mixed"
+        )
         self.paste_delay_input = QSpinBox()
+        self.paste_delay_input.setObjectName("InsetStepperField")
         self.paste_delay_input.setRange(50, 2000)
         self.paste_delay_input.setSuffix(" ms")
         self.llm_debug_stream_checkbox = QCheckBox()
@@ -253,34 +295,22 @@ class SettingsWindow(QWidget):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
 
-        left_col = [
+        fields = [
             ("Record Hotkey", "hotkey", self.hotkey_combo),
             ("Whisper Model", "whisper_model", self.whisper_model_input),
             ("ASR Language", "asr_language", self.language_input),
-        ]
-        right_col = [
             ("Ollama Host", "ollama_host", self.ollama_host_input),
             ("Ollama Model", "ollama_model", self.ollama_model_input),
             ("UI Language", "ui_language", self.ui_locale_combo),
             ("Auto Paste Delay", "paste_delay", self.paste_delay_input),
-            (
-                "LLM Debug Stream",
-                "llm_debug_stream",
-                self.llm_debug_stream_checkbox,
-            ),
+            ("LLM Debug Stream", "llm_debug_stream", self.llm_debug_stream_checkbox),
         ]
 
-        for row, (en_text, key, widget) in enumerate(left_col):
+        for row, (en_text, key, widget) in enumerate(fields):
             label = QLabel(_tr(self._locale, en_text, key))
             label.setObjectName("WindowSubtitle")
             form.addWidget(label, row, 0)
             form.addWidget(widget, row, 1)
-            self._form_labels.append((label, en_text, key))
-        for row, (en_text, key, widget) in enumerate(right_col):
-            label = QLabel(_tr(self._locale, en_text, key))
-            label.setObjectName("WindowSubtitle")
-            form.addWidget(label, row, 2)
-            form.addWidget(widget, row, 3)
             self._form_labels.append((label, en_text, key))
 
         root = QVBoxLayout()
@@ -317,7 +347,6 @@ class SettingsWindow(QWidget):
         dictionary_layout.addWidget(self.dictionary_edit)
 
         settings_card = self._build_glass_card()
-        settings_card.setMaximumHeight(210)
         settings_layout = QVBoxLayout(settings_card)
         settings_layout.setContentsMargins(16, 14, 16, 14)
         self._params_card_title = self._card_title(
@@ -340,12 +369,18 @@ class SettingsWindow(QWidget):
         container_layout.addWidget(dictionary_card, 1)
         container_layout.addWidget(settings_card, 0)
 
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setWidget(container)
+
         button_row = QHBoxLayout()
         button_row.addStretch(1)
         button_row.addWidget(self.save_button)
-        container_layout.addLayout(button_row)
 
-        root.addWidget(container)
+        root.addWidget(scroll_area, 1)
+        root.addLayout(button_row, 0)
         self.setLayout(root)
         self.setStyleSheet(IOS26_STYLESHEET)
         self.controller.settings_updated.connect(self.load_from_settings)
@@ -398,6 +433,12 @@ class SettingsWindow(QWidget):
         )
         self.request_mic_button.setText(
             _tr(self._locale, "Request Microphone Permission", "request_mic_permission")
+        )
+        self.ui_locale_combo.setItemText(
+            0, _tr(self._locale, "English", "ui_option_english")
+        )
+        self.ui_locale_combo.setItemText(
+            1, _tr(self._locale, "Chinese", "ui_option_chinese")
         )
         for label, en_text, key in self._form_labels:
             label.setText(_tr(self._locale, en_text, key))
