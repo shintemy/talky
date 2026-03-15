@@ -51,31 +51,26 @@ If no model is installed:
 ollama pull <your-model>
 ```
 
-### 3) First Install and Daily Usage (Step-by-step CLI)
+### 3) Operation Guides (Local and LAN Ollama)
 
 Install prerequisites manually first:
 - Python 3
 - Ollama: https://ollama.com/download
 
-#### Step A (one-time): system dependency setup
+#### A) Local Ollama (same Mac running Talky)
 
-Install Homebrew first (if not installed), then install ffmpeg.
-
-If you use a local proxy, first confirm your own proxy port. The commands below use `7897` as an example:
+Step 1 (one-time): system dependencies + environment + Whisper model
 
 ```bash
 export https_proxy=http://127.0.0.1:7897
 export http_proxy=http://127.0.0.1:7897
 brew install ffmpeg
-```
 
-#### Step B (one-time): environment fix + model download
-
-```bash
 cd /path/to/talky
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python3 download_model.py
 ```
 
 If you use SOCKS proxy and see `socksio` / proxy errors:
@@ -84,7 +79,7 @@ If you use SOCKS proxy and see `socksio` / proxy errors:
 pip install "httpx[socks]"
 ```
 
-If you use proxy-based model download, configure it before downloading:
+If you use proxy-based model download:
 
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
@@ -93,17 +88,69 @@ export all_proxy=socks5://127.0.0.1:7897
 python3 download_model.py
 ```
 
-#### Step C (daily): one-click start
-
-Choose Ollama mode in Settings:
-- Local Ollama: `Ollama Host = http://127.0.0.1:11434`
-- LAN Ollama: `Ollama Host = http://<LAN_IP>:11434`
+Step 2 (one-time): first startup
 
 ```bash
 cd /path/to/talky
 chmod +x start_talky.command
 ./start_talky.command
 ```
+
+Step 3 (daily): force local mode + auto-restart
+
+```bash
+cd /path/to/talky
+./start_talky.command --remote "http://127.0.0.1:11434" --model "qwen3.5:9b" --restart
+```
+
+Step 4: success signals
+- `mode: local`
+- `Using Ollama model: ...`
+- `ASR elapsed`, `LLM elapsed`, `Final text`
+
+#### B) LAN Ollama (Mac mini model host + MacBook Talky client)
+
+Step 1 (Mac mini): prepare Ollama service and model
+
+```bash
+ollama --version
+ollama ls
+pkill ollama
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+```
+
+Open another terminal on Mac mini to verify listener:
+
+```bash
+lsof -nP -iTCP:11434 -sTCP:LISTEN
+```
+
+Expected: `*:11434` or `0.0.0.0:11434`
+
+Step 2 (Mac mini): get LAN IP
+
+```bash
+ipconfig getifaddr en1
+```
+
+Step 3 (MacBook): verify connectivity and remote API
+
+```bash
+nc -vz <LAN_IP> 11434
+curl http://<LAN_IP>:11434/api/tags
+```
+
+Step 4 (MacBook): one-line switch to LAN mode + auto-restart
+
+```bash
+cd /path/to/talky
+./start_talky.command --remote "http://<LAN_IP>:11434" --model "qwen3.5:4b" --restart
+```
+
+Step 5: success signals
+- `mode: remote`
+- `Using Ollama model: qwen3.5:4b`
+- `ASR elapsed`, `LLM elapsed`, `Final text`
 
 Optional launcher app:
 - Use `talky_launcher.applescript` in this repo as a template.
@@ -123,7 +170,7 @@ Notes:
 - No need to run `chmod +x` again.
 - Startup checks remote git updates and fast-forwards when available.
 - `start_talky.command` unsets proxy variables before app launch to keep local Ollama access stable.
-- If your network requires proxy for model download, run `download_model.py` manually (Step B) before daily start.
+- If your network requires proxy for model download, run `download_model.py` manually (Local Step 1) before daily start.
 - In LAN mode, Talky skips local `ollama serve` startup and uses the configured remote host directly.
 - First run helper: if no host is configured and local Ollama is unavailable/no model, startup asks you to choose local vs remote host before model check.
 

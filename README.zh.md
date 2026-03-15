@@ -51,31 +51,26 @@ echo "Disk free:" && df -h .
 ollama pull <your-model>
 ```
 
-### 3）首次安装与后续使用（命令行分步引导）
+### 3）操作指引（默认：本地大模型）
 
 先手动安装前置依赖：
 - Python 3
 - Ollama（https://ollama.com/download）
 
-#### Step A（一次性）：系统依赖安装
+#### A）本地大模型（Talky 与 Ollama 在同一台 Mac）
 
-先安装 Homebrew（若未安装），再安装 ffmpeg。
-
-若你使用本地代理，请先确认你自己的代理端口。下面以 `7897` 为示例：
+Step 1（一次性）：系统依赖 + 环境准备 + Whisper 模型下载
 
 ```bash
 export https_proxy=http://127.0.0.1:7897
 export http_proxy=http://127.0.0.1:7897
 brew install ffmpeg
-```
 
-#### Step B（一次性）：环境修复与模型下载
-
-```bash
 cd /path/to/talky
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python3 download_model.py
 ```
 
 若你使用 SOCKS 代理并出现 `socksio` / 代理报错：
@@ -93,17 +88,27 @@ export all_proxy=socks5://127.0.0.1:7897
 python3 download_model.py
 ```
 
-#### Step C（日常）：一键启动
-
-请先在设置面板里选择 Ollama 模式：
-- 本地 Ollama：`Ollama Host = http://127.0.0.1:11434`
-- 局域网 Ollama：`Ollama Host = http://<局域网IP>:11434`
+Step 2（一次性）：首次启动
 
 ```bash
 cd /path/to/talky
 chmod +x start_talky.command
 ./start_talky.command
 ```
+
+Step 3（日常）：一键切回本地模式并自动重启
+
+```bash
+cd /path/to/talky
+./start_talky.command --remote "http://127.0.0.1:11434" --model "qwen3.5:9b" --restart
+```
+
+Step 4：成功信号
+- `mode: local`
+- `Using Ollama model: ...`
+- `ASR elapsed`、`LLM elapsed`、`Final text`
+
+如果你使用局域网连接其他设备的大模型，请查看 [局域网大模型流程（LAN Ollama）](LAN_OLLAMA_GUIDE.zh.md)。
 
 可选启动器 App：
 - 仓库已提供 `talky_launcher.applescript` 模板。
@@ -123,7 +128,7 @@ chmod +x start_talky.command
 - 无需重复执行 `chmod +x`。
 - 启动时会先检查远端更新，有新版本会自动快进更新后再启动。
 - `start_talky.command` 在启动前会清理代理变量，以保证本地 Ollama 连接稳定。
-- 若你所在网络必须代理下载模型，请按 Step B 先手动执行 `download_model.py`。
+- 若你所在网络必须代理下载模型，请按“本地 Step 1”先手动执行 `download_model.py`。
 - 局域网模式下，Talky 会跳过本机 `ollama serve` 启动步骤，直接连接配置的远端地址。
 - 首次引导：若尚未配置 host 且本地 Ollama 不可用/无模型，启动时会先让你选择本地或远端地址，再继续模型检查。
 

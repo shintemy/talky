@@ -11,3 +11,20 @@ local_whisper_model/
 tests/pics.iconset/
 tests/pics_valid.iconset/
 history/
+.logs/
+
+# Python bytecode/cache
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Packaging / test artifacts
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+
+# IDE/editor metadata
+.vscode/
+.idea/
