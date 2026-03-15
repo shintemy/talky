@@ -4,6 +4,59 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
+CLI_OLLAMA_HOST=""
+CLI_OLLAMA_MODEL=""
+CLI_RESTART="0"
+
+print_usage() {
+  cat <<'EOF'
+Usage: ./start_talky.command [options]
+
+Options:
+  --remote, --set-ollama-host <host>   Set ollama_host in ~/.talky/settings.json
+  --model,  --set-ollama-model <name>  Set ollama_model in ~/.talky/settings.json
+  --restart                            Stop running Talky and restart with new settings
+  -h, --help                           Show this help
+
+Example:
+  ./start_talky.command --remote "http://192.168.31.210:11434" --model "qwen3.5:4b" --restart
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --remote|--set-ollama-host)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "Error: missing value for --remote/--set-ollama-host"
+        exit 1
+      fi
+      CLI_OLLAMA_HOST="$1"
+      ;;
+    --model|--set-ollama-model)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "Error: missing value for --model/--set-ollama-model"
+        exit 1
+      fi
+      CLI_OLLAMA_MODEL="$1"
+      ;;
+    --restart)
+      CLI_RESTART="1"
+      ;;
+    -h|--help)
+      print_usage
+      exit 0
+      ;;
+    *)
+      echo "Error: unknown argument: $1"
+      print_usage
+      exit 1
+      ;;
+  esac
+  shift
+done
+
 echo "==> Talky one-click start"
 
 print_repo_version() {
@@ -168,6 +221,43 @@ print(value)
 PY
 }
 
+write_ollama_model_config() {
+  local model_value="$1"
+  OLLAMA_MODEL_INPUT="$model_value" python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+value = (os.environ.get("OLLAMA_MODEL_INPUT", "") or "").strip() or "qwen3.5:9b"
+config_path = Path.home() / ".talky" / "settings.json"
+data = {}
+if config_path.exists():
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+data["ollama_model"] = value
+config_path.parent.mkdir(parents=True, exist_ok=True)
+config_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+print(value)
+PY
+}
+
+restart_running_talky() {
+  local pids
+  pids="$(pgrep -f "$PROJECT_DIR/main.py" || true)"
+  if [[ -z "$pids" ]]; then
+    return
+  fi
+  echo "==> Restart requested: stopping existing Talky process..."
+  while IFS= read -r pid; do
+    if [[ -n "$pid" && "$pid" != "$$" ]]; then
+      kill "$pid" >/dev/null 2>&1 || true
+    fi
+  done <<< "$pids"
+  sleep 1
+}
+
 run_ollama_host_wizard() {
   echo ""
   echo "==> First-run Ollama host setup"
@@ -230,6 +320,20 @@ PY
   fi
   echo "==> Ollama host: $OLLAMA_HOST (mode: remote)"
 }
+
+if [[ -n "$CLI_OLLAMA_HOST" ]]; then
+  saved_host="$(write_ollama_host_config "$CLI_OLLAMA_HOST")"
+  echo "==> Quick config: ollama_host = $saved_host"
+fi
+
+if [[ -n "$CLI_OLLAMA_MODEL" ]]; then
+  saved_model="$(write_ollama_model_config "$CLI_OLLAMA_MODEL")"
+  echo "==> Quick config: ollama_model = $saved_model"
+fi
+
+if [[ "$CLI_RESTART" == "1" ]]; then
+  restart_running_talky
+fi
 
 FIRST_RUN_NO_HOST_CONFIG="$(is_first_run_without_host_config)"
 WIZARD_USED="0"
@@ -405,4 +509,4 @@ fi
 echo "==> Using Ollama model: $MODEL_NAME"
 
 echo "==> Launching Talky..."
-exec python main.py
+exec python "$PROJECT_DIR/main.py"
