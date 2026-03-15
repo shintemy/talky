@@ -51,15 +51,15 @@ If no model is installed:
 ollama pull <your-model>
 ```
 
-### 3) Operation Guides (Local and LAN Ollama)
+### 3) Operation Guide (Default: Local Ollama)
 
 Install prerequisites manually first:
 - Python 3
 - Ollama: https://ollama.com/download
 
-#### A) Local Ollama (same Mac running Talky)
+#### A) Local Ollama (Talky and Ollama on the same Mac)
 
-Step 1 (one-time): system dependencies + environment + Whisper model
+Step 1 (one-time): system dependencies + environment setup + Whisper model download
 
 ```bash
 export https_proxy=http://127.0.0.1:7897
@@ -96,7 +96,7 @@ chmod +x start_talky.command
 ./start_talky.command
 ```
 
-Step 3 (daily): force local mode + auto-restart
+Step 3 (daily): one-click switch back to local mode and auto-restart
 
 ```bash
 cd /path/to/talky
@@ -108,49 +108,7 @@ Step 4: success signals
 - `Using Ollama model: ...`
 - `ASR elapsed`, `LLM elapsed`, `Final text`
 
-#### B) LAN Ollama (Mac mini model host + MacBook Talky client)
-
-Step 1 (Mac mini): prepare Ollama service and model
-
-```bash
-ollama --version
-ollama ls
-pkill ollama
-OLLAMA_HOST=0.0.0.0:11434 ollama serve
-```
-
-Open another terminal on Mac mini to verify listener:
-
-```bash
-lsof -nP -iTCP:11434 -sTCP:LISTEN
-```
-
-Expected: `*:11434` or `0.0.0.0:11434`
-
-Step 2 (Mac mini): get LAN IP
-
-```bash
-ipconfig getifaddr en1
-```
-
-Step 3 (MacBook): verify connectivity and remote API
-
-```bash
-nc -vz <LAN_IP> 11434
-curl http://<LAN_IP>:11434/api/tags
-```
-
-Step 4 (MacBook): one-line switch to LAN mode + auto-restart
-
-```bash
-cd /path/to/talky
-./start_talky.command --remote "http://<LAN_IP>:11434" --model "qwen3.5:4b" --restart
-```
-
-Step 5: success signals
-- `mode: remote`
-- `Using Ollama model: qwen3.5:4b`
-- `ASR elapsed`, `LLM elapsed`, `Final text`
+If you use LAN to connect to models on another device, see [LAN Ollama Workflow (LAN Ollama)](LAN_OLLAMA_GUIDE.md).
 
 Optional launcher app:
 - Use `talky_launcher.applescript` in this repo as a template.
