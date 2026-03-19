@@ -11,3 +11,4 @@ opencc-python-reimplemented
 pyobjc-framework-ApplicationServices
 pyobjc-framework-Cocoa
 pyobjc-framework-Quartz
+pyobjc-framework-AVFoundation

@@ -134,3 +134,61 @@ def test_install_signal_handlers_starts_qt_signal_pump_timer(monkeypatch) -> Non
     assert main_module._SIGNAL_PUMP_TIMER is timer
     assert app.props["talky_signal_pump_timer"] is timer
     assert len(app.aboutToQuit.connected) == 1
+
+
+def test_try_acquire_single_instance_lock_returns_false_when_locked(
+    monkeypatch, tmp_path
+) -> None:
+    app = FakeApp()
+
+    class FakeQApplication:
+        @staticmethod
+        def instance() -> FakeApp:
+            return app
+
+    fake_qtwidgets = SimpleNamespace(QApplication=FakeQApplication)
+    fake_pyqt6 = SimpleNamespace(QtWidgets=fake_qtwidgets)
+    monkeypatch.setitem(sys.modules, "PyQt6", fake_pyqt6)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", fake_qtwidgets)
+    sys.modules.pop("main", None)
+    main_module = importlib.import_module("main")
+
+    monkeypatch.setattr(
+        main_module,
+        "single_instance_lock_path",
+        lambda: tmp_path / "talky.lock",
+    )
+
+    def _raise_blocking(_fd, _flags):  # noqa: ANN001
+        raise BlockingIOError()
+
+    monkeypatch.setattr(main_module.fcntl, "flock", _raise_blocking)
+
+    assert main_module.try_acquire_single_instance_lock() is False
+
+
+def test_main_exits_early_when_another_instance_is_running(monkeypatch) -> None:
+    app_init_called = {"value": False}
+
+    class FakeQApplication:
+        def __init__(self, _argv) -> None:  # noqa: ANN001
+            app_init_called["value"] = True
+
+    fake_qtwidgets = SimpleNamespace(QApplication=FakeQApplication)
+    fake_pyqt6 = SimpleNamespace(QtWidgets=fake_qtwidgets)
+    monkeypatch.setitem(sys.modules, "PyQt6", fake_pyqt6)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", fake_qtwidgets)
+    sys.modules.pop("main", None)
+    main_module = importlib.import_module("main")
+
+    notified = {"value": False}
+    monkeypatch.setattr(
+        main_module,
+        "notify_running_instance_show_settings",
+        lambda: notified.__setitem__("value", True),
+    )
+    monkeypatch.setattr(main_module, "try_acquire_single_instance_lock", lambda: False)
+
+    assert main_module.main() == 0
+    assert app_init_called["value"] is False
+    assert notified["value"] is True

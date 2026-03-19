@@ -168,3 +168,39 @@ def test_stop_records_last_duration_and_rms(monkeypatch: pytest.MonkeyPatch) -> 
     expected_rms = float(np.sqrt(np.mean(np.square(np.array([[0.0], [0.5], [-0.5], [0.0]], dtype=np.float32)))))
     assert recorder.last_rms == pytest.approx(expected_rms, rel=1e-6)
     wav_path.unlink(missing_ok=True)
+
+
+def test_start_prefers_built_in_microphone_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder_module = _load_recorder_module(monkeypatch)
+
+    devices = [
+        {"name": "USB Mic", "max_input_channels": 1, "default_samplerate": 48000},
+        {
+            "name": "MacBook Pro Microphone",
+            "max_input_channels": 1,
+            "default_samplerate": 48000,
+        },
+    ]
+
+    def fake_query_devices(arg=None, kind=None):  # noqa: ANN001, ANN003
+        if kind == "input":
+            return devices[0]
+        if isinstance(arg, int):
+            return devices[arg]
+        return devices
+
+    captured: dict[str, object] = {}
+    stream = _FakeStream()
+
+    def fake_input_stream(**kwargs):  # noqa: ANN003
+        captured["device"] = kwargs.get("device")
+        return stream
+
+    monkeypatch.setattr(recorder_module.sd, "query_devices", fake_query_devices)
+    monkeypatch.setattr(recorder_module.sd, "InputStream", fake_input_stream)
+
+    recorder = recorder_module.AudioRecorder(sample_rate=16000)
+    recorder.start()
+
+    assert captured["device"] == 1
+    assert "MacBook Pro Microphone" in recorder.active_input_device_label

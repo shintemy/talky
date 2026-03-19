@@ -143,3 +143,15 @@ def test_request_microphone_permission_requests_when_not_determined(
 
     assert ok is True
     assert error == ""
+
+
+def test_check_microphone_granted_false_when_avfoundation_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    permissions = importlib.import_module("talky.permissions")
+    monkeypatch.delitem(sys.modules, "AVFoundation", raising=False)
+
+    ok, error = permissions.check_microphone_granted()
+
+    assert ok is False
+    assert "status unavailable" in error.lower()

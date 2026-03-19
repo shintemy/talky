@@ -150,7 +150,23 @@ pkill ollama
 ollama serve
 ```
 
-### 4）愿景
+### 4）内部测试版 DMG 打包
+
+用于小范围内部测试的 unsigned 安装包：
+
+```bash
+./scripts/build_unsigned_dmg.sh
+```
+
+输出路径：
+
+- `release/Talky-<version>-unsigned.dmg`
+
+完整测试流程与验收清单请看：
+
+- `docs/DMG_INTERNAL_TESTING.md`
+
+### 5）愿景
 
 Talky 的目标是让语音输入在高频开发和写作场景中真正可用：
 - 更私密：本地计算，不上传云端

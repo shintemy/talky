@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import threading
 import time
+import traceback
+from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
 
@@ -80,9 +82,7 @@ class AppController(QObject):
             debug_stream=self.settings.llm_debug_stream,
         )
         self.paster = ClipboardPaster(paste_delay_ms=self.settings.auto_paste_delay_ms)
-        self.history_store = HistoryStore(
-            Path(__file__).resolve().parent.parent / "history"
-        )
+        self.history_store = HistoryStore(Path.home() / ".talky" / "history")
 
         self._is_processing = False
         self._is_recording = False
@@ -90,6 +90,7 @@ class AppController(QObject):
         self._last_output_text = ""
         self._last_output_ts = 0.0
         self._hotkey_cooldown_until_ts = 0.0
+        self._error_log_path = Path.home() / ".talky" / "logs" / "error.log"
 
     def start(self) -> None:
         self._start_hotkey()
@@ -102,6 +103,12 @@ class AppController(QObject):
         if self.hotkey:
             self.hotkey.stop()
             self.hotkey = None
+
+    def update_dictionary(self, terms: list[str]) -> None:
+        """Lightweight save that only updates custom dictionary (no service rebuild)."""
+        self.settings.custom_dictionary = terms
+        self.config_store.save(self.settings)
+        self.settings_updated.emit(self.settings)
 
     def update_settings(self, new_settings: AppSettings) -> None:
         self.settings = new_settings
@@ -151,10 +158,24 @@ class AppController(QObject):
             custom_keys=self.settings.custom_hotkey,
             on_press=self._on_hotkey_pressed,
             on_release=self._on_hotkey_released,
+            on_error=self.error_signal.emit,
         )
-        self.hotkey.start()
+        started = self.hotkey.start()
+        if not started:
+            self.error_signal.emit(
+                "Hotkey listener is unavailable. "
+                "Grant Accessibility and Input Monitoring permissions, then restart Talky."
+            )
+            return
         if self.hotkey.using_fallback:
-            self.status_signal.emit("Fn hook unavailable. Fallback to Right Option.")
+            if self.settings.hotkey == "fn":
+                self.settings.hotkey = "right_option"
+                self.config_store.save(self.settings)
+                self.settings_updated.emit(self.settings)
+            self.error_signal.emit(
+                "Fn hotkey is unavailable on this macOS setup. "
+                "Switched to Right Option for hold-to-talk."
+            )
 
     def _on_hotkey_pressed(self) -> None:
         if time.monotonic() < self._hotkey_cooldown_until_ts:
@@ -190,7 +211,8 @@ class AppController(QObject):
                 return
             if rms < _MIN_RECORD_RMS:
                 self.status_signal.emit(
-                    f"Audio too quiet (rms={rms:.4f}). Ignored."
+                    "Audio too quiet "
+                    f"(rms={rms:.4f}, device={self.recorder.active_input_device_label}). Ignored."
                 )
                 wav_path.unlink(missing_ok=True)
                 return
@@ -204,7 +226,10 @@ class AppController(QObject):
             worker.start()
         except Exception as exc:
             self._is_recording = False
-            self.error_signal.emit(f"Failed to stop recording: {exc}")
+            self._record_error("Failed to stop recording", exc)
+            self.error_signal.emit(
+                f"Failed to stop recording: {exc}\nDetails: {self._error_log_path}"
+            )
         finally:
             self._hotkey_cooldown_until_ts = time.monotonic() + _HOTKEY_COOLDOWN_S
 
@@ -282,13 +307,33 @@ class AppController(QObject):
                 self.show_result_popup_signal.emit(final_text)
                 self.status_signal.emit("No focus target detected. Showing floating panel.")
         except Exception as exc:
-            self.error_signal.emit(f"Processing failed: {exc}")
+            self._record_error("Processing failed", exc)
+            self.error_signal.emit(
+                f"Processing failed: {exc}\nDetails: {self._error_log_path}"
+            )
         finally:
             self._is_processing = False
             try:
                 wav_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+    def _record_error(self, context: str, exc: Exception) -> None:
+        try:
+            self._error_log_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = (
+                f"\n[{datetime.now().isoformat(timespec='seconds')}] {context}\n"
+                f"{exc}\n"
+                f"{traceback.format_exc()}\n"
+            )
+            self._error_log_path.write_text(
+                self._error_log_path.read_text(encoding="utf-8") + payload
+                if self._error_log_path.exists()
+                else payload,
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
 
     def _warm_up_models_async(self) -> None:
         worker = threading.Thread(target=self._warm_up_models, daemon=True)

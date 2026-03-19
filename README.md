@@ -150,7 +150,23 @@ pkill ollama
 ollama serve
 ```
 
-### 4) Vision
+### 4) Build Unsigned DMG (Internal Testing)
+
+To build an unsigned test installer for small-scale internal testing:
+
+```bash
+./scripts/build_unsigned_dmg.sh
+```
+
+Output:
+
+- `release/Talky-<version>-unsigned.dmg`
+
+For full internal testing flow and acceptance checklist, see:
+
+- `docs/DMG_INTERNAL_TESTING.md`
+
+### 5) Vision
 
 Talky aims to make voice input truly usable for daily coding and writing:
 - private (local compute, no cloud upload)

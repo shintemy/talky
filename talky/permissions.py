@@ -35,17 +35,11 @@ def check_microphone_granted() -> tuple[bool, str]:
             return True, ""
         return False, "Microphone permission not granted."
     except Exception:
-        # Fallback path when AVFoundation bindings are unavailable.
-        try:
-            import sounddevice as sd
-
-            stream = sd.InputStream(samplerate=16000, channels=1, dtype="float32")
-            stream.start()
-            stream.stop()
-            stream.close()
-            return True, ""
-        except Exception as exc:
-            return False, f"Microphone permission not granted: {exc}"
+        return (
+            False,
+            "Microphone permission status unavailable "
+            "(missing pyobjc AVFoundation bindings).",
+        )
 
 
 def request_microphone_permission() -> tuple[bool, str]:
@@ -85,7 +79,8 @@ def request_microphone_permission() -> tuple[bool, str]:
             return True, ""
         return False, "Microphone permission not granted."
     except Exception:
-        # Fallback path: touching input stream may trigger system prompt.
+        # Fallback path: touching input stream may trigger system prompt,
+        # but without AVFoundation bindings we cannot reliably verify status.
         try:
             import sounddevice as sd
 
@@ -93,9 +88,13 @@ def request_microphone_permission() -> tuple[bool, str]:
             stream.start()
             stream.stop()
             stream.close()
-            return True, ""
         except Exception as exc:
-            return False, f"Microphone permission not granted: {exc}"
+            return False, f"Microphone permission prompt failed: {exc}"
+        return (
+            False,
+            "Microphone permission status unavailable "
+            "(missing pyobjc AVFoundation bindings).",
+        )
 
 
 def check_ollama_reachable() -> tuple[bool, str]:

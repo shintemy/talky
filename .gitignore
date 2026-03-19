@@ -3,6 +3,8 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+release/
+*.spec
 *.log
 .DS_Store
 local_whisper_model/
@@ -29,3 +31,4 @@ htmlcov/
 # IDE/editor metadata
 .vscode/
 .idea/
+.worktrees/

@@ -18,6 +18,8 @@ class AudioRecorder:
         self._active_sample_rate = float(sample_rate)
         self._last_duration_s = 0.0
         self._last_rms = 0.0
+        self._active_input_device: int | None = None
+        self._active_input_device_label = "unknown"
 
     @property
     def is_recording(self) -> bool:
@@ -31,12 +33,18 @@ class AudioRecorder:
     def last_rms(self) -> float:
         return self._last_rms
 
+    @property
+    def active_input_device_label(self) -> str:
+        return self._active_input_device_label
+
     def start(self) -> None:
         if self._stream is not None:
             return
         self._chunks.clear()
         self._last_duration_s = 0.0
         self._last_rms = 0.0
+        self._active_input_device = None
+        self._active_input_device_label = "unknown"
 
         def _callback(indata: np.ndarray, frames: int, time_info: dict, status) -> None:
             del frames, time_info
@@ -73,23 +81,80 @@ class AudioRecorder:
         raise RuntimeError("Failed to open input stream.")
 
     def _open_input_stream(self, callback, sample_rate: float):
+        device_index = self._select_input_device_index()
+        self._active_input_device = device_index
+        self._active_input_device_label = self._describe_input_device(device_index)
         return sd.InputStream(
             samplerate=sample_rate,
             channels=self.channels,
             dtype="float32",
             callback=callback,
+            device=device_index,
         )
 
     def _default_input_sample_rate(self) -> float:
         try:
-            default_input = sd.query_devices(kind="input")
-            if isinstance(default_input, dict):
-                value = default_input.get("default_samplerate")
+            device_index = self._select_input_device_index()
+            device_info = sd.query_devices(device_index)
+            if isinstance(device_info, dict):
+                value = device_info.get("default_samplerate")
                 if value:
                     return float(value)
         except Exception:
             pass
         return float(self.sample_rate)
+
+    def _select_input_device_index(self) -> int | None:
+        try:
+            devices = sd.query_devices()
+            if not isinstance(devices, (list, tuple)):
+                return None
+        except Exception:
+            return None
+
+        built_in_keywords = (
+            "macbook pro microphone",
+            "built-in microphone",
+            "internal microphone",
+            "内建麦克风",
+        )
+        for idx, info in enumerate(devices):
+            try:
+                channels = int(info.get("max_input_channels", 0))
+                name = str(info.get("name", "")).lower()
+            except Exception:
+                continue
+            if channels > 0 and any(keyword in name for keyword in built_in_keywords):
+                return idx
+
+        try:
+            default_pair = sd.default.device
+            if isinstance(default_pair, (list, tuple)) and len(default_pair) >= 1:
+                default_input = int(default_pair[0])
+                if default_input >= 0:
+                    info = sd.query_devices(default_input)
+                    if int(info.get("max_input_channels", 0)) > 0:
+                        return default_input
+        except Exception:
+            pass
+
+        for idx, info in enumerate(devices):
+            try:
+                if int(info.get("max_input_channels", 0)) > 0:
+                    return idx
+            except Exception:
+                continue
+        return None
+
+    def _describe_input_device(self, device_index: int | None) -> str:
+        if device_index is None:
+            return "system-default"
+        try:
+            info = sd.query_devices(device_index)
+            name = str(info.get("name", "")).strip() or f"#{device_index}"
+            return f"{name} (#{device_index})"
+        except Exception:
+            return f"#{device_index}"
 
     def _is_recoverable_portaudio_error(self, exc: sd.PortAudioError) -> bool:
         message = str(exc).lower()
