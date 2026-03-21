@@ -325,6 +325,18 @@ class SettingsWindow(QWidget):
         self.hotkey_widget = QWidget()
         self.hotkey_widget.setLayout(hotkey_controls)
 
+        self._mode_combo = QComboBox()
+        self._mode_combo.setObjectName("InsetIconField")
+        self._mode_combo.addItem("Local (Free)", userData="local")
+        self._mode_combo.addItem("Cloud (Subscription)", userData="cloud")
+        self._mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+
+        self._cloud_url_input = QLineEdit()
+        self._cloud_url_input.setPlaceholderText("http://192.168.x.x:8000")
+        self._cloud_key_input = QLineEdit()
+        self._cloud_key_input.setPlaceholderText("sk-talky-...")
+        self._cloud_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+
         self.whisper_model_input = QLineEdit()
         self.ollama_model_input = QLineEdit()
         self.ollama_host_input = QLineEdit()
@@ -382,6 +394,9 @@ class SettingsWindow(QWidget):
         form.setVerticalSpacing(10)
 
         fields = [
+            ("Processing Mode", "processing_mode", self._mode_combo),
+            ("Cloud API URL", "cloud_api_url", self._cloud_url_input),
+            ("Cloud API Key", "cloud_api_key", self._cloud_key_input),
             ("Record Hotkey", "hotkey", self.hotkey_widget),
             ("Whisper Model", "whisper_model", self.whisper_model_input),
             ("ASR Language", "asr_language", self.language_input),
@@ -480,6 +495,11 @@ class SettingsWindow(QWidget):
         idx = self.hotkey_combo.findData(settings.hotkey)
         self.hotkey_combo.setCurrentIndex(0 if idx < 0 else idx)
         self._apply_hotkey_control_state()
+        mode_idx = self._mode_combo.findData(settings.mode)
+        self._mode_combo.setCurrentIndex(0 if mode_idx < 0 else mode_idx)
+        self._cloud_url_input.setText(settings.cloud_api_url)
+        self._cloud_key_input.setText(settings.cloud_api_key)
+        self._update_cloud_field_visibility()
         self.whisper_model_input.setText(settings.whisper_model)
         self.ollama_host_input.setText(settings.ollama_host)
         self.ollama_model_input.setText(settings.ollama_model)
@@ -544,6 +564,22 @@ class SettingsWindow(QWidget):
         for label, en_text, key in self._form_labels:
             label.setText(_tr(self._locale, en_text, key))
         self._refresh_custom_hotkey_preview()
+
+    def _on_mode_changed(self, _index: int) -> None:
+        self._update_cloud_field_visibility()
+
+    def _update_cloud_field_visibility(self) -> None:
+        is_cloud = str(self._mode_combo.currentData()) == "cloud"
+        self._cloud_url_input.setVisible(is_cloud)
+        self._cloud_key_input.setVisible(is_cloud)
+        self.whisper_model_input.setVisible(not is_cloud)
+        self.ollama_host_input.setVisible(not is_cloud)
+        self.ollama_model_input.setVisible(not is_cloud)
+        for label, _en, key in self._form_labels:
+            if key in ("cloud_api_url", "cloud_api_key"):
+                label.setVisible(is_cloud)
+            elif key in ("whisper_model", "ollama_host", "ollama_model"):
+                label.setVisible(not is_cloud)
 
     def _on_hotkey_mode_changed(self) -> None:
         self._apply_hotkey_control_state()
@@ -663,6 +699,9 @@ class SettingsWindow(QWidget):
             llm_debug_stream=self.llm_debug_stream_checkbox.isChecked(),
             sample_rate=self.controller.settings.sample_rate,
             channels=self.controller.settings.channels,
+            mode=str(self._mode_combo.currentData()),
+            cloud_api_url=self._cloud_url_input.text().strip(),
+            cloud_api_key=self._cloud_key_input.text().strip(),
         )
         # Delay hotkey listener rebuild until after the click event loop settles.
         # This avoids macOS input-source assertion crashes on some machines.

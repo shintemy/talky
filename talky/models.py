@@ -40,6 +40,9 @@ class AppSettings:
     llm_debug_stream: bool = False
     sample_rate: int = 16000
     channels: int = 1
+    mode: str = "local"  # "local" | "cloud"
+    cloud_api_url: str = ""
+    cloud_api_key: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
@@ -58,6 +61,9 @@ class AppSettings:
             llm_debug_stream=bool(data.get("llm_debug_stream", False)),
             sample_rate=int(data.get("sample_rate", 16000)),
             channels=int(data.get("channels", 1)),
+            mode=str(data.get("mode", "local")),
+            cloud_api_url=str(data.get("cloud_api_url", "")),
+            cloud_api_key=str(data.get("cloud_api_key", "")),
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -26,6 +26,7 @@ from talky.paster import ClipboardPaster
 from talky.permissions import check_ollama_reachable
 from talky.prompting import build_asr_initial_prompt
 from talky.recorder import AudioRecorder
+from talky.remote_service import CloudProcessService
 from talky.text_guard import (
     collapse_duplicate_output,
     enforce_pronoun_consistency,
@@ -83,6 +84,7 @@ class AppController(QObject):
         self.history_store = HistoryStore(
             Path(__file__).resolve().parent.parent / "history"
         )
+        self.cloud_service: CloudProcessService | None = self._build_cloud_service()
 
         self._is_processing = False
         self._is_recording = False
@@ -113,6 +115,22 @@ class AppController(QObject):
         self.settings_updated.emit(new_settings)
         self.status_signal.emit("Settings saved.")
 
+    def _build_cloud_service(self) -> CloudProcessService | None:
+        if (
+            self.settings.mode == "cloud"
+            and self.settings.cloud_api_url
+            and self.settings.cloud_api_key
+        ):
+            return CloudProcessService(
+                api_url=self.settings.cloud_api_url,
+                api_key=self.settings.cloud_api_key,
+            )
+        return None
+
+    @property
+    def is_cloud_mode(self) -> bool:
+        return self.settings.mode == "cloud" and self.cloud_service is not None
+
     def _rebuild_services(self) -> None:
         self._apply_ollama_host_env()
         self.recorder = AudioRecorder(
@@ -128,6 +146,7 @@ class AppController(QObject):
             debug_stream=self.settings.llm_debug_stream,
         )
         self.paster = ClipboardPaster(paste_delay_ms=self.settings.auto_paste_delay_ms)
+        self.cloud_service = self._build_cloud_service()
 
     def _apply_ollama_host_env(self) -> None:
         host = (self.settings.ollama_host or "http://127.0.0.1:11434").strip().rstrip("/")
@@ -208,60 +227,78 @@ class AppController(QObject):
         finally:
             self._hotkey_cooldown_until_ts = time.monotonic() + _HOTKEY_COOLDOWN_S
 
+    def _process_cloud(self, wav_path: Path) -> str:
+        assert self.cloud_service is not None
+        dict_terms = extract_terms(
+            parse_dictionary_entries(self.settings.custom_dictionary)
+        )
+        cloud_start = time.perf_counter()
+        final_text = self.cloud_service.process(
+            audio_path=wav_path,
+            dictionary=dict_terms,
+            language=self.settings.language,
+        )
+        cloud_elapsed = time.perf_counter() - cloud_start
+        print(f"[Talky] Cloud elapsed: {cloud_elapsed:.2f}s")
+        final_text = normalize_to_simplified_chinese(final_text)
+        return final_text
+
+    def _process_local(self, wav_path: Path) -> str:
+        ok, error = check_ollama_reachable()
+        if not ok:
+            host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+            if self._is_local_ollama_host(host):
+                guide = (
+                    "\nRun: ollama serve and ensure model exists: "
+                    + self.settings.ollama_model
+                )
+            else:
+                guide = (
+                    "\nCheck remote Ollama host and model on: "
+                    + host
+                    + "\nExpected model: "
+                    + self.settings.ollama_model
+                )
+            raise RuntimeError(error + guide)
+
+        dictionary_entries = parse_dictionary_entries(self.settings.custom_dictionary)
+        dict_terms = extract_terms(dictionary_entries)
+        person_terms = extract_person_terms(dictionary_entries)
+        asr_prompt = build_asr_initial_prompt(dict_terms)
+        asr_start = time.perf_counter()
+        raw_text = self.asr.transcribe(wav_path, initial_prompt=asr_prompt)
+        asr_elapsed = time.perf_counter() - asr_start
+        print(f"[Talky] ASR elapsed: {asr_elapsed:.2f}s")
+        if not raw_text:
+            raise RuntimeError("ASR returned empty text. Please retry.")
+        corrected_raw_text = apply_phonetic_dictionary(raw_text, dict_terms)
+        if len(corrected_raw_text.replace(" ", "").strip()) < 2:
+            self.status_signal.emit("ASR text too short. LLM step skipped.")
+            return ""
+
+        llm_start = time.perf_counter()
+        final_text = self.llm.clean(
+            raw_text=corrected_raw_text,
+            dictionary_terms=dict_terms,
+        )
+        llm_elapsed = time.perf_counter() - llm_start
+        print(f"[Talky] LLM elapsed: {llm_elapsed:.2f}s")
+        final_text = apply_phonetic_dictionary(final_text, dict_terms)
+        final_text = normalize_person_pronouns(final_text, person_terms)
+        final_text = enforce_pronoun_consistency(corrected_raw_text, final_text)
+        final_text = enforce_source_boundaries(corrected_raw_text, final_text)
+        final_text = collapse_duplicate_output(final_text)
+        final_text = normalize_to_simplified_chinese(final_text)
+        return final_text
+
     def _process_pipeline(self, wav_path: Path) -> None:
         try:
-            ok, error = check_ollama_reachable()
-            if not ok:
-                host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-                if self._is_local_ollama_host(host):
-                    guide = (
-                        "\nRun: ollama serve and ensure model exists: "
-                        + self.settings.ollama_model
-                    )
-                else:
-                    guide = (
-                        "\nCheck remote Ollama host and model on: "
-                        + host
-                        + "\nExpected model: "
-                        + self.settings.ollama_model
-                    )
-                raise RuntimeError(
-                    error
-                    + guide
-                )
-
-            dictionary_entries = parse_dictionary_entries(self.settings.custom_dictionary)
-            dict_terms = extract_terms(dictionary_entries)
-            person_terms = extract_person_terms(dictionary_entries)
-            asr_prompt = build_asr_initial_prompt(dict_terms)
-            asr_start = time.perf_counter()
-            raw_text = self.asr.transcribe(wav_path, initial_prompt=asr_prompt)
-            asr_elapsed = time.perf_counter() - asr_start
-            print(f"[Talky] ASR elapsed: {asr_elapsed:.2f}s")
-            if not raw_text:
-                raise RuntimeError("ASR returned empty text. Please retry.")
-            corrected_raw_text = apply_phonetic_dictionary(raw_text, dict_terms)
-            # Skip LLM for very short/noisy ASR outputs to avoid hallucinated expansions.
-            if len(corrected_raw_text.replace(" ", "").strip()) < 2:
-                self.status_signal.emit("ASR text too short. LLM step skipped.")
-                return
-
-            llm_start = time.perf_counter()
-            final_text = self.llm.clean(
-                raw_text=corrected_raw_text,
-                dictionary_terms=dict_terms,
-            )
-            llm_elapsed = time.perf_counter() - llm_start
-            print(f"[Talky] LLM elapsed: {llm_elapsed:.2f}s")
-            final_text = apply_phonetic_dictionary(final_text, dict_terms)
-            final_text = normalize_person_pronouns(final_text, person_terms)
-            final_text = enforce_pronoun_consistency(corrected_raw_text, final_text)
-            final_text = enforce_source_boundaries(corrected_raw_text, final_text)
-            final_text = collapse_duplicate_output(final_text)
-            # Keep cross-device output style stable by normalizing Chinese to Simplified.
-            final_text = normalize_to_simplified_chinese(final_text)
+            if self.is_cloud_mode:
+                final_text = self._process_cloud(wav_path)
+            else:
+                final_text = self._process_local(wav_path)
             if not final_text:
-                raise RuntimeError("LLM returned empty text. Please retry.")
+                return
 
             now = time.monotonic()
             if final_text == self._last_output_text and (now - self._last_output_ts) < 1.2:
@@ -291,6 +328,8 @@ class AppController(QObject):
                 pass
 
     def _warm_up_models_async(self) -> None:
+        if self.is_cloud_mode:
+            return
         worker = threading.Thread(target=self._warm_up_models, daemon=True)
         worker.start()
 
