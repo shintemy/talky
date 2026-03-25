@@ -7,6 +7,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+RECOMMENDED_OLLAMA_MODEL = "qwen3.5:9b"
+
+
 def detect_ollama_model(host: str = "") -> str:
     """Query Ollama for installed models and return the first one found."""
     host = (host or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")).rstrip("/")
@@ -32,7 +35,7 @@ class AppSettings:
     hotkey: str = "fn"  # "fn" or "right_option"
     custom_hotkey: list[str] = field(default_factory=list)
     whisper_model: str = "./local_whisper_model"
-    ollama_model: str = "qwen3.5:9b"
+    ollama_model: str = RECOMMENDED_OLLAMA_MODEL
     ollama_host: str = "http://127.0.0.1:11434"
     ui_locale: str = "en"  # "en" or "mixed"
     language: str = "zh"
@@ -53,7 +56,7 @@ class AppSettings:
             whisper_model=str(
                 data.get("whisper_model", "./local_whisper_model")
             ),
-            ollama_model=str(data.get("ollama_model", "qwen3.5:9b")),
+            ollama_model=str(data.get("ollama_model", RECOMMENDED_OLLAMA_MODEL)),
             ollama_host=str(data.get("ollama_host", "http://127.0.0.1:11434")).rstrip("/"),
             ui_locale=str(data.get("ui_locale", "en")),
             language=str(data.get("language", "zh")),
