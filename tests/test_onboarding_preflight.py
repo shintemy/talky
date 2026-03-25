@@ -69,3 +69,51 @@ def test_detect_system_locale_none():
 
     with patch("locale.getdefaultlocale", return_value=(None, None)):
         assert detect_system_locale() == "en"
+
+
+def test_preflight_all_ok():
+    from talky.onboarding import OllamaStatus, run_preflight_check
+
+    with (
+        patch("talky.onboarding.is_ollama_installed", return_value=True),
+        patch("talky.onboarding.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.onboarding.detect_ollama_model", return_value="qwen3.5:9b"),
+    ):
+        status = run_preflight_check()
+    assert status == OllamaStatus.READY
+
+
+def test_preflight_not_installed():
+    from talky.onboarding import OllamaStatus, run_preflight_check
+
+    with (
+        patch("talky.onboarding.is_ollama_installed", return_value=False),
+        patch("talky.onboarding.check_ollama_reachable", return_value=(False, "err")),
+        patch("talky.onboarding.detect_ollama_model", return_value=""),
+    ):
+        status = run_preflight_check()
+    assert status == OllamaStatus.NOT_INSTALLED
+
+
+def test_preflight_not_running():
+    from talky.onboarding import OllamaStatus, run_preflight_check
+
+    with (
+        patch("talky.onboarding.is_ollama_installed", return_value=True),
+        patch("talky.onboarding.check_ollama_reachable", return_value=(False, "err")),
+        patch("talky.onboarding.detect_ollama_model", return_value=""),
+    ):
+        status = run_preflight_check()
+    assert status == OllamaStatus.NOT_RUNNING
+
+
+def test_preflight_no_models():
+    from talky.onboarding import OllamaStatus, run_preflight_check
+
+    with (
+        patch("talky.onboarding.is_ollama_installed", return_value=True),
+        patch("talky.onboarding.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.onboarding.detect_ollama_model", return_value=""),
+    ):
+        status = run_preflight_check()
+    assert status == OllamaStatus.NO_MODEL
