@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import urllib.request
 
@@ -16,6 +17,10 @@ def is_accessibility_trusted(prompt: bool = False) -> bool:
         return bool(AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: prompt}))
     except Exception:
         return False
+
+
+def is_ollama_installed() -> bool:
+    return shutil.which("ollama") is not None
 
 
 def check_microphone_granted() -> tuple[bool, str]:
