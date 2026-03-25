@@ -110,6 +110,8 @@ Part 4：成功信号
 
 如果你使用局域网连接其他设备的大模型，请查看 [局域网大模型流程（LAN Ollama）](LAN_OLLAMA_GUIDE.zh.md)。
 
+若你使用 **DMG 安装版**（不用 `start_talky.command`），请在 **Dashboard → Configs** 中填写 Ollama 地址，完整步骤见 **[DMG 版：局域网 Ollama](docs/DMG_LAN_OLLAMA.zh.md)**。
+
 可选启动器 App：
 - 仓库已提供 `talky_launcher.applescript` 模板。
 - 将其中 `set scriptPath to "/path/to/start_talky.command"` 改为你本机路径。
