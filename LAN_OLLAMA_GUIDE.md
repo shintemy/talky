@@ -2,6 +2,8 @@
 
 Use this guide when `Mac mini` hosts Ollama models and `MacBook` runs Talky.
 
+> **Using the DMG build?** Configure **Dashboard → Configs** instead — see **[DMG: LAN Ollama](docs/DMG_LAN_OLLAMA.md)**. The steps below assume the source tree + `start_talky.command`.
+
 ## Step 1 (Mac mini): prepare Ollama service and model
 
 ```bash

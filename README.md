@@ -110,6 +110,8 @@ Part 4: success signals
 
 If you use LAN to connect to models on another device, see [LAN Ollama Workflow (LAN Ollama)](LAN_OLLAMA_GUIDE.md).
 
+If you use the **DMG** app (not `start_talky.command`), configure **Dashboard → Configs** instead — see **[DMG: LAN Ollama](docs/DMG_LAN_OLLAMA.md)**.
+
 Optional launcher app:
 - Use `talky_launcher.applescript` in this repo as a template.
 - Replace `set scriptPath to "/path/to/start_talky.command"` with your local path.

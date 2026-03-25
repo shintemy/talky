@@ -2,6 +2,8 @@
 
 适用场景：`Mac mini` 提供 Ollama 模型服务，`MacBook` 运行 Talky（录音 + ASR + 调用远端 LLM）。
 
+> **使用 DMG 安装版？** 请改用图形界面配置（Dashboard → Configs），见 **[DMG 版：局域网 Ollama](docs/DMG_LAN_OLLAMA.zh.md)**。本文档以下步骤面向源码 + `start_talky.command`。
+
 ## Step 1（Mac mini）：准备 Ollama 服务与模型
 
 ```bash
