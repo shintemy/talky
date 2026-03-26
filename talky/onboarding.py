@@ -61,7 +61,11 @@ _WIZARD_ZH = {
     "model_title": "准备模型",
     "recommended": "推荐模型",
     "copy_command": "复制命令",
+    "open_terminal": "在终端中下载",
+    "open_terminal_hint": "已在终端中开始下载，请等待下载完成后点击下方按钮",
+    "copied_hint": "已复制！请打开终端粘贴运行",
     "recheck_model": "我已下载，重新检测",
+    "recheck_no_model": "未检测到模型，请等待下载完成后重试",
     "complete_title": "一切就绪！",
     "complete_msg": "按住 Fn 键即可开始语音输入",
     "done": "完成",
@@ -400,17 +404,24 @@ class OnboardingWizard(QDialog):
         self._recommended_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._recommended_label)
 
-        cmd = f"ollama pull {RECOMMENDED_OLLAMA_MODEL}"
-        self._pull_cmd_label = QLabel(f"<code>{cmd}</code>")
+        self._pull_cmd = f"ollama pull {RECOMMENDED_OLLAMA_MODEL}"
+        self._pull_cmd_label = QLabel(f"<code>{self._pull_cmd}</code>")
         self._pull_cmd_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._pull_cmd_label.setTextFormat(Qt.TextFormat.RichText)
         layout.addWidget(self._pull_cmd_label)
+
+        open_term_btn = QPushButton(
+            _wiz_tr(self._locale, "Download in Terminal", "open_terminal")
+        )
+        open_term_btn.setObjectName("PrimaryButton")
+        open_term_btn.clicked.connect(self._open_terminal_pull)
+        layout.addWidget(open_term_btn)
 
         copy_btn = QPushButton(
             _wiz_tr(self._locale, "Copy Command", "copy_command")
         )
         copy_btn.setObjectName("SecondaryButton")
-        copy_btn.clicked.connect(lambda: self._copy_pull_command(cmd))
+        copy_btn.clicked.connect(self._copy_and_show_hint)
         layout.addWidget(copy_btn)
 
         recheck_btn = QPushButton(
@@ -449,10 +460,32 @@ class OnboardingWizard(QDialog):
             self._recommended_label.setVisible(True)
             self._pull_cmd_label.setVisible(True)
 
-    @staticmethod
-    def _copy_pull_command(cmd: str) -> None:
+    def _open_terminal_pull(self) -> None:
+        """Open Terminal.app and run the ollama pull command."""
+        import subprocess
+
+        script = f'tell application "Terminal" to do script "{self._pull_cmd}"'
+        subprocess.Popen(["osascript", "-e", script])  # noqa: S603, S607
+        self._model_status_label.setText(
+            _wiz_tr(
+                self._locale,
+                "Download started in Terminal. Click re-check when done.",
+                "open_terminal_hint",
+            )
+        )
+
+    def _copy_and_show_hint(self) -> None:
+        """Copy pull command to clipboard and show feedback."""
         import pyperclip
-        pyperclip.copy(cmd)
+
+        pyperclip.copy(self._pull_cmd)
+        self._model_status_label.setText(
+            _wiz_tr(
+                self._locale,
+                "Copied! Open Terminal and paste to run.",
+                "copied_hint",
+            )
+        )
 
     def _model_next(self) -> None:
         self._selected_model = self._model_combo.currentText()
@@ -473,8 +506,8 @@ class OnboardingWizard(QDialog):
             self._model_status_label.setText(
                 _wiz_tr(
                     self._locale,
-                    "No models found yet. Please run the pull command.",
-                    "connection_fail",
+                    "No models found yet. Please wait for download to finish and try again.",
+                    "recheck_no_model",
                 )
             )
 
