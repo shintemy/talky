@@ -16,11 +16,10 @@ class OllamaStatus(enum.Enum):
 
 def run_preflight_check() -> OllamaStatus:
     """Check Ollama installation, service, and model availability."""
-    if not is_ollama_installed():
-        reachable, _ = check_ollama_reachable()
-        if not reachable:
-            return OllamaStatus.NOT_INSTALLED
+    installed = is_ollama_installed()
     reachable, _ = check_ollama_reachable()
+    if not installed and not reachable:
+        return OllamaStatus.NOT_INSTALLED
     if not reachable:
         return OllamaStatus.NOT_RUNNING
     if not detect_ollama_model():
@@ -31,7 +30,7 @@ def run_preflight_check() -> OllamaStatus:
 def detect_system_locale() -> str:
     """Return 'zh' if macOS system language is Chinese, else 'en'."""
     try:
-        lang, _ = locale.getdefaultlocale()
+        lang, _ = locale.getlocale()
         if lang and lang.startswith("zh"):
             return "zh"
     except Exception:
@@ -519,11 +518,13 @@ class OnboardingWizard(QDialog):
     # -- Finish ----------------------------------------------------------------
 
     def _finish(self) -> None:
-        from talky.models import AppSettings
-        settings = AppSettings(
-            ollama_model=self._selected_model,
-            ollama_host=self._selected_host,
-        )
+        try:
+            settings = self._config_store.load()
+        except Exception:
+            from talky.models import AppSettings
+            settings = AppSettings()
+        settings.ollama_model = self._selected_model
+        settings.ollama_host = self._selected_host
         self._config_store.save(settings)
         self.accept()
 

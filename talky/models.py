@@ -12,21 +12,8 @@ RECOMMENDED_OLLAMA_MODEL = "qwen3.5:9b"
 
 def detect_ollama_model(host: str = "") -> str:
     """Query Ollama for installed models and return the first one found."""
-    host = (host or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")).rstrip("/")
-    try:
-        req = urllib.request.Request(
-            url=f"{host}/api/tags",
-            headers={"Content-Type": "application/json"},
-            method="GET",
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
-            data = json.loads(resp.read().decode("utf-8"))
-        models = data.get("models", [])
-        if models:
-            return str(models[0].get("name", ""))
-    except Exception:
-        pass
-    return ""
+    models = list_ollama_models(host)
+    return models[0] if models else ""
 
 
 def list_ollama_models(host: str = "") -> list[str]:
