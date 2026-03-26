@@ -53,21 +53,21 @@ def test_list_ollama_models_returns_empty_on_failure():
 def test_detect_system_locale_zh():
     from talky.onboarding import detect_system_locale
 
-    with patch("locale.getdefaultlocale", return_value=("zh_CN", "UTF-8")):
+    with patch("locale.getlocale", return_value=("zh_CN", "UTF-8")):
         assert detect_system_locale() == "zh"
 
 
 def test_detect_system_locale_en():
     from talky.onboarding import detect_system_locale
 
-    with patch("locale.getdefaultlocale", return_value=("en_US", "UTF-8")):
+    with patch("locale.getlocale", return_value=("en_US", "UTF-8")):
         assert detect_system_locale() == "en"
 
 
 def test_detect_system_locale_none():
     from talky.onboarding import detect_system_locale
 
-    with patch("locale.getdefaultlocale", return_value=(None, None)):
+    with patch("locale.getlocale", return_value=(None, None)):
         assert detect_system_locale() == "en"
 
 
