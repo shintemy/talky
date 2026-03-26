@@ -58,9 +58,11 @@ _WIZARD_ZH = {
     "connection_ok": "连接成功",
     "connection_fail": "连接失败",
     "select_model": "选择模型",
-    "model_title": "准备模型",
+    "model_title": "下载 AI 模型",
+    "model_subtitle": "Talky 推荐使用 <b>{model}</b>，点击下方按钮即可开始下载。",
+    "or_manual": "或手动运行：",
     "recommended": "推荐模型",
-    "copy_command": "复制命令",
+    "copy_command": "复制",
     "open_terminal": "在终端中下载",
     "open_terminal_hint": "已在终端中开始下载，请等待下载完成后点击下方按钮",
     "copied_hint": "已复制！请打开终端粘贴运行",
@@ -370,17 +372,81 @@ class OnboardingWizard(QDialog):
 
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(32, 24, 32, 24)
 
+        # --- Title + subtitle ---
         title = QLabel(
-            _wiz_tr(self._locale, "Prepare Model", "model_title")
+            _wiz_tr(self._locale, "Download AI Model", "model_title")
         )
-        title.setObjectName("CardTitle")
+        title.setObjectName("WindowTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        layout.addSpacing(10)
 
-        # Model combo (visible if local models exist)
+        subtitle_text = _wiz_tr(
+            self._locale,
+            f"Talky recommends <b>{RECOMMENDED_OLLAMA_MODEL}</b> — click the button below to start downloading.",
+            "model_subtitle",
+        ).format(model=RECOMMENDED_OLLAMA_MODEL)
+        subtitle = QLabel(subtitle_text)
+        subtitle.setObjectName("WindowSubtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
+        subtitle.setTextFormat(Qt.TextFormat.RichText)
+        layout.addWidget(subtitle)
+        layout.addSpacing(16)
+
+        # --- Primary action: one-click download ---
+        self._pull_cmd = f"ollama pull {RECOMMENDED_OLLAMA_MODEL}"
+        open_term_btn = QPushButton(
+            _wiz_tr(self._locale, "Download in Terminal", "open_terminal")
+        )
+        open_term_btn.setObjectName("PrimaryButton")
+        open_term_btn.setMinimumHeight(44)
+        open_term_btn.clicked.connect(self._open_terminal_pull)
+        layout.addWidget(open_term_btn)
+        layout.addSpacing(12)
+
+        # --- Manual command (right below the primary button) ---
+        cmd_row = QHBoxLayout()
+        cmd_label = QLabel(
+            f'<span style="color:#888; font-size:12px;">'
+            f'{_wiz_tr(self._locale, "Or run manually:", "or_manual")}</span>'
+            f'  <code style="background:#f0f0f0; padding:2px 6px; border-radius:4px;">'
+            f'{self._pull_cmd}</code>'
+        )
+        cmd_label.setTextFormat(Qt.TextFormat.RichText)
+        cmd_row.addWidget(cmd_label, 1)
+
+        copy_btn = QPushButton(
+            _wiz_tr(self._locale, "Copy", "copy_command")
+        )
+        copy_btn.setFixedWidth(60)
+        copy_btn.setStyleSheet(
+            "font-size: 12px; padding: 4px 8px; border-radius: 8px; "
+            "background: rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.1);"
+        )
+        copy_btn.clicked.connect(self._copy_and_show_hint)
+        cmd_row.addWidget(copy_btn)
+        layout.addLayout(cmd_row)
+
+        # Status feedback (appears after clicking download, copy or re-check)
+        self._model_status_label = QLabel("")
+        self._model_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._model_status_label.setWordWrap(True)
+        self._model_status_label.setStyleSheet("color: #666; font-size: 12px; padding: 4px 0;")
+        layout.addWidget(self._model_status_label)
+        layout.addSpacing(24)
+
+        # --- Secondary: re-check after download finishes ---
+        recheck_btn = QPushButton(
+            _wiz_tr(self._locale, "I've downloaded, re-check", "recheck_model")
+        )
+        recheck_btn.setObjectName("SecondaryButton")
+        recheck_btn.setMinimumHeight(40)
+        recheck_btn.clicked.connect(self._recheck_models)
+        layout.addWidget(recheck_btn)
+
+        # --- Existing-models dropdown (hidden until models found) ---
         self._model_combo_label = QLabel(
             _wiz_tr(self._locale, "Select Model", "select_model")
         )
@@ -396,45 +462,10 @@ class OnboardingWizard(QDialog):
         self._model_next_btn.clicked.connect(self._model_next)
         layout.addWidget(self._model_next_btn)
 
-        # Recommended model section (visible if no models)
-        self._recommended_label = QLabel(
-            _wiz_tr(self._locale, "Recommended model", "recommended")
-            + f": {RECOMMENDED_OLLAMA_MODEL}"
-        )
-        self._recommended_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._recommended_label)
-
-        self._pull_cmd = f"ollama pull {RECOMMENDED_OLLAMA_MODEL}"
-        self._pull_cmd_label = QLabel(f"<code>{self._pull_cmd}</code>")
-        self._pull_cmd_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._pull_cmd_label.setTextFormat(Qt.TextFormat.RichText)
-        layout.addWidget(self._pull_cmd_label)
-
-        open_term_btn = QPushButton(
-            _wiz_tr(self._locale, "Download in Terminal", "open_terminal")
-        )
-        open_term_btn.setObjectName("PrimaryButton")
-        open_term_btn.clicked.connect(self._open_terminal_pull)
-        layout.addWidget(open_term_btn)
-
-        copy_btn = QPushButton(
-            _wiz_tr(self._locale, "Copy Command", "copy_command")
-        )
-        copy_btn.setObjectName("SecondaryButton")
-        copy_btn.clicked.connect(self._copy_and_show_hint)
-        layout.addWidget(copy_btn)
-
-        recheck_btn = QPushButton(
-            _wiz_tr(self._locale, "I've downloaded, re-check", "recheck_model")
-        )
-        recheck_btn.setObjectName("SecondaryButton")
-        recheck_btn.clicked.connect(self._recheck_models)
-        layout.addWidget(recheck_btn)
-
-        self._model_status_label = QLabel("")
-        self._model_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._model_status_label.setWordWrap(True)
-        layout.addWidget(self._model_status_label)
+        # Keep references for visibility toggling
+        self._recommended_widgets = [subtitle, open_term_btn, recheck_btn]
+        self._recommended_label = subtitle  # kept for _refresh_model_combo compat
+        self._pull_cmd_label = cmd_label
 
         # Populate with current models
         self._refresh_model_combo()
@@ -446,19 +477,17 @@ class OnboardingWizard(QDialog):
 
         models = list_ollama_models()
         self._model_combo.clear()
-        if models:
+        has_models = bool(models)
+        if has_models:
             self._model_combo.addItems(models)
-            self._model_combo.setVisible(True)
-            self._model_combo_label.setVisible(True)
-            self._model_next_btn.setVisible(True)
-            self._recommended_label.setVisible(False)
-            self._pull_cmd_label.setVisible(False)
-        else:
-            self._model_combo.setVisible(False)
-            self._model_combo_label.setVisible(False)
-            self._model_next_btn.setVisible(False)
-            self._recommended_label.setVisible(True)
-            self._pull_cmd_label.setVisible(True)
+        # Show download flow or model-selection flow
+        for w in self._recommended_widgets:
+            w.setVisible(not has_models)
+        self._pull_cmd_label.setVisible(not has_models)
+        self._model_status_label.setVisible(not has_models)
+        self._model_combo.setVisible(has_models)
+        self._model_combo_label.setVisible(has_models)
+        self._model_next_btn.setVisible(has_models)
 
     def _open_terminal_pull(self) -> None:
         """Open Terminal.app and run the ollama pull command."""
