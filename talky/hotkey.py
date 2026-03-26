@@ -92,9 +92,9 @@ class HoldToTalkHotkey:
     def stop(self) -> None:
         if self._run_loop is not None:
             try:
-                import Quartz
+                from CoreFoundation import CFRunLoopStop
 
-                Quartz.CFRunLoopStop(self._run_loop)
+                CFRunLoopStop(self._run_loop)
             except Exception:
                 pass
             self._run_loop = None
@@ -104,6 +104,7 @@ class HoldToTalkHotkey:
     def _start_modifier_quartz_listener(self, required: set[str]) -> None:
         try:
             import Quartz
+            from CoreFoundation import CFRunLoopGetCurrent, CFRunLoopRun
         except Exception:
             return
 
@@ -154,11 +155,11 @@ class HoldToTalkHotkey:
                 return
 
             source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
-            run_loop = Quartz.CFRunLoopGetCurrent()
+            run_loop = CFRunLoopGetCurrent()
             self._run_loop = run_loop
             Quartz.CFRunLoopAddSource(run_loop, source, Quartz.kCFRunLoopCommonModes)
             Quartz.CGEventTapEnable(tap, True)
-            Quartz.CFRunLoopRun()
+            CFRunLoopRun()
 
         self._quartz_thread = threading.Thread(target=_run_event_tap, daemon=True)
         self._quartz_thread.start()
@@ -166,6 +167,7 @@ class HoldToTalkHotkey:
     def _start_fn_quartz_listener(self) -> bool:
         try:
             import Quartz
+            from CoreFoundation import CFRunLoopGetCurrent, CFRunLoopRun
         except Exception:
             return False
 
@@ -203,11 +205,11 @@ class HoldToTalkHotkey:
                 return
 
             source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
-            run_loop = Quartz.CFRunLoopGetCurrent()
+            run_loop = CFRunLoopGetCurrent()
             self._run_loop = run_loop
             Quartz.CFRunLoopAddSource(run_loop, source, Quartz.kCFRunLoopCommonModes)
             Quartz.CGEventTapEnable(tap, True)
-            Quartz.CFRunLoopRun()
+            CFRunLoopRun()
 
         self._quartz_thread = threading.Thread(target=_run_event_tap, daemon=True)
         self._quartz_thread.start()
@@ -232,6 +234,7 @@ class GlobalShortcutListener:
             return
         try:
             import Quartz
+            from CoreFoundation import CFRunLoopGetCurrent, CFRunLoopRun
         except Exception:
             return
 
@@ -265,11 +268,11 @@ class GlobalShortcutListener:
             if tap is None:
                 return
             source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
-            run_loop = Quartz.CFRunLoopGetCurrent()
+            run_loop = CFRunLoopGetCurrent()
             self._run_loop = run_loop
             Quartz.CFRunLoopAddSource(run_loop, source, Quartz.kCFRunLoopCommonModes)
             Quartz.CGEventTapEnable(tap, True)
-            Quartz.CFRunLoopRun()
+            CFRunLoopRun()
 
         self._quartz_thread = threading.Thread(target=_run_event_tap, daemon=True)
         self._quartz_thread.start()
@@ -277,9 +280,9 @@ class GlobalShortcutListener:
     def stop(self) -> None:
         if self._run_loop is not None:
             try:
-                import Quartz
+                from CoreFoundation import CFRunLoopStop
 
-                Quartz.CFRunLoopStop(self._run_loop)
+                CFRunLoopStop(self._run_loop)
             except Exception:
                 pass
             self._run_loop = None
