@@ -82,6 +82,12 @@ fi
 if [[ -f "$TRAY_ICON_DIR/talky-logo.png" ]]; then
   EXTRA_PYI_ARGS+=(--add-data "$TRAY_ICON_DIR/talky-logo.png:assets")
 fi
+if [[ -f "$TRAY_ICON_DIR/wizard_ollama.png" ]]; then
+  EXTRA_PYI_ARGS+=(--add-data "$TRAY_ICON_DIR/wizard_ollama.png:assets")
+  EXTRA_PYI_ARGS+=(--add-data "$TRAY_ICON_DIR/wizard_model.png:assets")
+  EXTRA_PYI_ARGS+=(--add-data "$TRAY_ICON_DIR/wizard_whisper.png:assets")
+  EXTRA_PYI_ARGS+=(--add-data "$TRAY_ICON_DIR/wizard_done.png:assets")
+fi
 
 RUNTIME_HOOK="$PROJECT_DIR/scripts/pyinstaller_hooks/runtime_hook_stubs.py"
 VERSION_FILE="$PROJECT_DIR/talky/version_checker.py"
