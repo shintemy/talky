@@ -97,8 +97,11 @@ def _wiz_tr(loc: str, en: str, key: str) -> str:
 # OnboardingWizard
 # ---------------------------------------------------------------------------
 
+import sys as _sys
+from pathlib import Path as _Path
+
 from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtGui import QDesktopServices, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -171,6 +174,24 @@ class OnboardingWizard(QDialog):
             QTimer.singleShot(0, self._goto_all_set)
         else:
             self.stack.setCurrentIndex(start_page)
+
+    # -- Helpers ---------------------------------------------------------------
+
+    @staticmethod
+    def _make_icon(filename: str) -> QLabel:
+        if getattr(_sys, "frozen", False):
+            base = _Path(_sys._MEIPASS)  # noqa: SLF001
+        else:
+            base = _Path(__file__).resolve().parent.parent
+        path = str(base / "assets" / filename)
+        lbl = QLabel()
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pm = QPixmap(path)
+        if not pm.isNull():
+            pm.setDevicePixelRatio(2.0)
+        lbl.setPixmap(pm)
+        lbl.setFixedSize(80, 80)
+        return lbl
 
     # -- Page 0: Mode Selection ------------------------------------------------
 
@@ -251,6 +272,9 @@ class OnboardingWizard(QDialog):
         layout.setContentsMargins(32, 24, 32, 24)
 
         layout.addStretch()
+
+        layout.addWidget(self._make_icon("wizard_ollama.png"), 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addSpacing(16)
 
         title = QLabel(
             _wiz_tr(
@@ -418,6 +442,9 @@ class OnboardingWizard(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 24, 32, 24)
+
+        layout.addWidget(self._make_icon("wizard_model.png"), 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addSpacing(16)
 
         # --- Title + subtitle ---
         title = QLabel(
@@ -612,6 +639,9 @@ class OnboardingWizard(QDialog):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 24, 32, 24)
 
+        layout.addWidget(self._make_icon("wizard_whisper.png"), 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addSpacing(16)
+
         title = QLabel(
             _wiz_tr(self._locale, "Download Speech Model", "whisper_title")
         )
@@ -789,6 +819,9 @@ class OnboardingWizard(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(self._make_icon("wizard_done.png"), 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addSpacing(16)
 
         title = QLabel(
             _wiz_tr(self._locale, "All set!", "complete_title")

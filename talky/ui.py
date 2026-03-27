@@ -605,9 +605,15 @@ QMessageBox QPushButton {
 
 /* ---- Popup card ---- */
 QFrame#PopupCard {
-    background: rgba(255, 255, 255, 245);
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: #FFFFFF;
+    border: 1px solid rgba(0, 0, 0, 0.12);
     border-radius: 12px;
+}
+
+QFrame#PopupCard QPushButton#PrimaryButton {
+    padding: 10px 16px;
+    font-size: 14px;
+    border-radius: 8px;
 }
 
 /* ---- Progress bar ---- */
@@ -2332,7 +2338,7 @@ class ResultPopupWindow(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(560, 360)
+        self.resize(480, 320)
         self._fade_animation: QPropertyAnimation | None = None
         self._slide_animation: QPropertyAnimation | None = None
 
@@ -2350,22 +2356,26 @@ class ResultPopupWindow(QWidget):
         self.copy_close_button.setObjectName("PrimaryButton")
         self.copy_close_button.clicked.connect(self._copy_and_close)
 
+        shadow_margin = 20
         root = QVBoxLayout()
-        root.setContentsMargins(10, 10, 10, 10)
+        root.setContentsMargins(shadow_margin, shadow_margin, shadow_margin, shadow_margin)
 
         card = QFrame()
         card.setObjectName("PopupCard")
         shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(36)
-        shadow.setOffset(0, 12)
-        shadow.setColor(Qt.GlobalColor.gray)
+        shadow.setBlurRadius(40)
+        shadow.setOffset(0, 8)
+        shadow.setColor(QColor(0, 0, 0, 60))
         card.setGraphicsEffect(shadow)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(16, 14, 16, 16)
+        card_layout.setContentsMargins(20, 18, 20, 20)
+        card_layout.setSpacing(8)
         card_layout.addWidget(self.title)
         card_layout.addWidget(self.subtitle)
-        card_layout.addWidget(self.text_view)
+        card_layout.addSpacing(4)
+        card_layout.addWidget(self.text_view, 1)
+        card_layout.addSpacing(4)
         card_layout.addWidget(self.copy_close_button)
         root.addWidget(card)
         self.setLayout(root)
