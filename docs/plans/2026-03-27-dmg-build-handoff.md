@@ -1,28 +1,31 @@
-# DMG 未签名构建 — 状态记录（给新 session）
+# DMG 未签名构建 — 状态记录
 
-**日期**: 2026-03-27
-**分支**: `main`（所有 worktree / feature 分支的代码已合并回 main）
-**最新提交**: `faab99b fix(tray): use LaunchServices restart to fix tray icon missing after relaunch`
+**日期**: 2026-03-28
+**分支**: `main`
+**最新提交**: `33e8ef8 style: add wizard page icons and fix result popup card`
+**最新 DMG**: `release/Talky-2026.03.28-33e8ef8-unsigned.dmg` (53 MB)
+**GitHub Release**: `v0.4.0-alpha`
 
 ---
 
-## 0. 最新进展快照（本次会话收敛）
+## 0. 最新进展快照
 
 > 这一节用于"开新 session 快速接手"，优先看这里。
 
 ### 当前状态一句话
 
-**所有功能代码已合并到 `main`，包括 4-tab Dashboard UI 大合并。但有 19 个文件未提交。需要重新打 DMG 验证。**
+**所有功能代码已合并到 `main` 并推送到 GitHub。DMG 已打包验证通过，已发布为 GitHub Release `v0.4.0-alpha`。**
 
 ### 已验证通过（用户已确认）
 
 1. **新 DMG 可安装并启动。**
-2. **不 reset 的情况下，按住 fn 可以识别出文字。**
+2. **按住 fn 可以识别出文字并粘贴。**
 3. **onboarding 选择 remote 且连接通过后，settings 持久保存为 `mode=remote`。**
 4. **Reset → onboarding → whisper 模型下载 → 自动重启后 tray icon 正常显示。**
 5. **老用户流程 + 新用户流程均可跑通。**
-
-> 注意：以上验证基于 UI 合并前的 DMG。UI 合并后尚未重新打包测试。
+6. **4-tab Dashboard UI（Home / Dictionary / Prompt / Configs）正常工作。**
+7. **Onboarding wizard 带图标，统一尺寸，流程顺畅。**
+8. **复制面板弹窗（ResultPopupWindow）样式规范。**
 
 ### 本会话最后完成的工作：UI 大合并
 
