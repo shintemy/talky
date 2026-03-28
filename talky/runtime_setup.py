@@ -12,15 +12,34 @@ _INSTALL_LOCK = threading.Lock()
 _EXTRA_SITE_PACKAGES = Path.home() / ".talky" / "extra-site-packages"
 _RUNTIME_PACKAGES = ("numpy", "mlx", "mlx-whisper")
 
+_STANDALONE_PYTHON_DIR = Path.home() / ".talky" / "python"
+
+# Standalone CPython builds from astral-sh/python-build-standalone (Apple Silicon).
+# Update the mapping when the bundled app's Python version changes.
+_STANDALONE_PYTHON_URLS: dict[tuple[int, int], str] = {
+    (3, 12): (
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        "20250317/cpython-3.12.9+20250317-aarch64-apple-darwin-install_only.tar.gz"
+    ),
+    (3, 13): (
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        "20250317/cpython-3.13.2+20250317-aarch64-apple-darwin-install_only.tar.gz"
+    ),
+}
+
 
 def install_local_whisper_runtime() -> tuple[bool, str]:
     """Install local Whisper runtime deps into ~/.talky/extra-site-packages."""
     py = _find_python3()
     if not py:
-        return (
-            False,
-            "no compatible python found on PATH "
-            f"(required {sys.version_info.major}.{sys.version_info.minor})",
+        ok, result = _download_standalone_python()
+        if not ok:
+            return False, f"no compatible python available ({result})"
+        py = result
+        # Bootstrap pip for the freshly downloaded standalone Python.
+        subprocess.run(
+            [py, "-m", "ensurepip", "--upgrade"],
+            check=False, capture_output=True, text=True,
         )
 
     _EXTRA_SITE_PACKAGES.mkdir(parents=True, exist_ok=True)
@@ -72,9 +91,64 @@ def ensure_local_whisper_runtime() -> tuple[bool, str]:
         return False, "installer exited successfully but runtime artifacts were not found"
 
 
+def _download_standalone_python() -> tuple[bool, str]:
+    """Download a standalone CPython to ~/.talky/python/ for pip-installing native packages.
+
+    Returns (True, python_binary_path) on success, (False, error_detail) on failure.
+    """
+    import platform
+    import tarfile
+    import tempfile
+    import urllib.request
+
+    target_bin = _STANDALONE_PYTHON_DIR / "bin" / "python3"
+    if target_bin.exists():
+        return True, str(target_bin)
+
+    if platform.machine() != "arm64":
+        return False, "auto-download only available on Apple Silicon Macs"
+
+    key = (sys.version_info.major, sys.version_info.minor)
+    url = _STANDALONE_PYTHON_URLS.get(key)
+    if not url:
+        return False, f"no standalone Python {key[0]}.{key[1]} download available"
+
+    parent = _STANDALONE_PYTHON_DIR.parent  # ~/.talky
+    parent.mkdir(parents=True, exist_ok=True)
+
+    if _STANDALONE_PYTHON_DIR.exists():
+        shutil.rmtree(_STANDALONE_PYTHON_DIR, ignore_errors=True)
+
+    tmp_file = tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)
+    tmp_path = Path(tmp_file.name)
+    tmp_file.close()
+    try:
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=180) as resp:  # noqa: S310
+            with tmp_path.open("wb") as f:
+                shutil.copyfileobj(resp, f)
+
+        with tarfile.open(str(tmp_path), "r:gz") as tar:
+            try:
+                tar.extractall(path=str(parent), filter="tar")
+            except TypeError:
+                tar.extractall(path=str(parent))
+
+        if target_bin.exists():
+            return True, str(target_bin)
+        return False, "extraction succeeded but python binary not found"
+    except Exception as exc:
+        if _STANDALONE_PYTHON_DIR.exists():
+            shutil.rmtree(_STANDALONE_PYTHON_DIR, ignore_errors=True)
+        return False, f"download failed: {exc}"
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def _find_python3() -> str | None:
     required = (sys.version_info.major, sys.version_info.minor)
     required_str = f"{required[0]}.{required[1]}"
+    home = Path.home()
     preferred = [
         f"python{required[0]}.{required[1]}",
         f"python{required[0]}",
@@ -86,7 +160,31 @@ def _find_python3() -> str | None:
         f"/usr/local/bin/python{required_str}",
         "/usr/local/bin/python3",
         f"/Library/Frameworks/Python.framework/Versions/{required_str}/bin/python3",
+        # MacPorts
+        f"/opt/local/bin/python{required_str}",
+        "/opt/local/bin/python3",
+        # Talky-managed standalone Python
+        str(_STANDALONE_PYTHON_DIR / "bin" / f"python{required_str}"),
+        str(_STANDALONE_PYTHON_DIR / "bin" / "python3"),
     ]
+
+    # Dynamic discovery: pyenv, mise, asdf
+    for base_dir in (
+        home / ".pyenv" / "versions",
+        home / ".local" / "share" / "mise" / "installs" / "python",
+        home / ".asdf" / "installs" / "python",
+    ):
+        if not base_dir.is_dir():
+            continue
+        try:
+            for entry in sorted(base_dir.iterdir(), reverse=True):
+                if entry.name.startswith(required_str) and entry.is_dir():
+                    candidate = entry / "bin" / "python3"
+                    if candidate.exists():
+                        preferred.append(str(candidate))
+        except OSError:
+            continue
+
     for name in preferred:
         p = shutil.which(name) if "/" not in name else name
         if not p or not Path(p).exists():

@@ -141,16 +141,12 @@ class MlxWhisperASR:
                     raise RuntimeError(
                         "Local Whisper runtime is unavailable after auto-install. "
                         f"Details: {second_exc}. "
-                        "You can run manually: "
-                        "`python3 -m pip install --target ~/.talky/extra-site-packages "
-                        "numpy mlx mlx-whisper` then restart Talky."
+                        "Please restart Talky to try again."
                     ) from second_exc
             raise RuntimeError(
                 "Local Whisper runtime is unavailable. "
                 f"Auto-install failed: {detail}. "
-                "You can run manually: "
-                "`python3 -m pip install --target ~/.talky/extra-site-packages "
-                "numpy mlx mlx-whisper` then restart Talky."
+                "Please check your network connection and restart Talky to retry."
             ) from first_exc
 
     def _load_audio_waveform(self, audio_path: Path):
