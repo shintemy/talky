@@ -8,6 +8,7 @@ dist/
 local_whisper_model/
 
 .cursor_updates.md
+dev-log.md
 FEATURE_BACKLOG.md
 LOCAL_OPERATION_MANUAL.md
 tests/pics.iconset/
