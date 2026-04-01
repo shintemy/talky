@@ -59,3 +59,28 @@ def test_alert_local_skips_when_ollama_ready(tmp_path):
     store = AppConfigStore(tmp_path / "settings.json")
     with patch("talky.onboarding.run_preflight_check", return_value=OllamaStatus.READY):
         assert alert_if_local_ollama_unready(store) is False
+
+
+def test_ensure_local_existing_user_missing_bound_model_enters_returning_prompt(tmp_path):
+    from talky.startup_gate import ensure_local_ollama_ready
+
+    store = AppConfigStore(tmp_path / "settings.json")
+    settings = store.load()
+    settings.ollama_model = "qwen3.5:9b"
+    store.save(settings)
+
+    with (
+        patch(
+            "talky.onboarding.run_preflight_check",
+            side_effect=[OllamaStatus.NO_MODEL, OllamaStatus.READY],
+        ) as mock_preflight,
+        patch("talky.onboarding.show_returning_user_prompt", return_value=True) as mock_prompt,
+    ):
+        assert ensure_local_ollama_ready(store) is True
+
+    assert mock_prompt.call_count == 1
+    called_kwargs = mock_prompt.call_args.kwargs
+    assert called_kwargs["expected_model"] == "qwen3.5:9b"
+    # startup preflight + post-prompt recheck should both enforce required_model
+    for call in mock_preflight.call_args_list:
+        assert call.kwargs["required_model"] == "qwen3.5:9b"

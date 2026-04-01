@@ -54,69 +54,93 @@ def test_list_ollama_models_returns_empty_on_failure():
 
 
 def test_detect_system_locale_zh():
-    from talky.onboarding import detect_system_locale
+    from talky.preflight import detect_system_locale
 
     with patch("locale.getlocale", return_value=("zh_CN", "UTF-8")):
         assert detect_system_locale() == "zh"
 
 
 def test_detect_system_locale_en():
-    from talky.onboarding import detect_system_locale
+    from talky.preflight import detect_system_locale
 
     with patch("locale.getlocale", return_value=("en_US", "UTF-8")):
         assert detect_system_locale() == "en"
 
 
 def test_detect_system_locale_none():
-    from talky.onboarding import detect_system_locale
+    from talky.preflight import detect_system_locale
 
     with patch("locale.getlocale", return_value=(None, None)):
         assert detect_system_locale() == "en"
 
 
 def test_preflight_all_ok():
-    from talky.onboarding import OllamaStatus, run_preflight_check
+    from talky.preflight import OllamaStatus, run_preflight_check
 
     with (
-        patch("talky.onboarding.is_ollama_installed", return_value=True),
-        patch("talky.onboarding.check_ollama_reachable", return_value=(True, "")),
-        patch("talky.onboarding.detect_ollama_model", return_value="qwen3.5:9b"),
+        patch("talky.preflight.is_ollama_installed", return_value=True),
+        patch("talky.preflight.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.preflight.list_ollama_models", return_value=["qwen3.5:9b"]),
     ):
         status = run_preflight_check()
     assert status == OllamaStatus.READY
 
 
 def test_preflight_not_installed():
-    from talky.onboarding import OllamaStatus, run_preflight_check
+    from talky.preflight import OllamaStatus, run_preflight_check
 
     with (
-        patch("talky.onboarding.is_ollama_installed", return_value=False),
-        patch("talky.onboarding.check_ollama_reachable", return_value=(False, "err")),
-        patch("talky.onboarding.detect_ollama_model", return_value=""),
+        patch("talky.preflight.is_ollama_installed", return_value=False),
+        patch("talky.preflight.check_ollama_reachable", return_value=(False, "err")),
+        patch("talky.preflight.list_ollama_models", return_value=[]),
     ):
         status = run_preflight_check()
     assert status == OllamaStatus.NOT_INSTALLED
 
 
 def test_preflight_not_running():
-    from talky.onboarding import OllamaStatus, run_preflight_check
+    from talky.preflight import OllamaStatus, run_preflight_check
 
     with (
-        patch("talky.onboarding.is_ollama_installed", return_value=True),
-        patch("talky.onboarding.check_ollama_reachable", return_value=(False, "err")),
-        patch("talky.onboarding.detect_ollama_model", return_value=""),
+        patch("talky.preflight.is_ollama_installed", return_value=True),
+        patch("talky.preflight.check_ollama_reachable", return_value=(False, "err")),
+        patch("talky.preflight.list_ollama_models", return_value=[]),
     ):
         status = run_preflight_check()
     assert status == OllamaStatus.NOT_RUNNING
 
 
 def test_preflight_no_models():
-    from talky.onboarding import OllamaStatus, run_preflight_check
+    from talky.preflight import OllamaStatus, run_preflight_check
 
     with (
-        patch("talky.onboarding.is_ollama_installed", return_value=True),
-        patch("talky.onboarding.check_ollama_reachable", return_value=(True, "")),
-        patch("talky.onboarding.detect_ollama_model", return_value=""),
+        patch("talky.preflight.is_ollama_installed", return_value=True),
+        patch("talky.preflight.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.preflight.list_ollama_models", return_value=[]),
     ):
         status = run_preflight_check()
     assert status == OllamaStatus.NO_MODEL
+
+
+def test_preflight_requires_configured_model():
+    from talky.preflight import OllamaStatus, run_preflight_check
+
+    with (
+        patch("talky.preflight.is_ollama_installed", return_value=True),
+        patch("talky.preflight.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.preflight.list_ollama_models", return_value=["qwen3.5:14b"]),
+    ):
+        status = run_preflight_check(required_model="qwen3.5:9b")
+    assert status == OllamaStatus.NO_MODEL
+
+
+def test_preflight_accepts_when_configured_model_exists():
+    from talky.preflight import OllamaStatus, run_preflight_check
+
+    with (
+        patch("talky.preflight.is_ollama_installed", return_value=True),
+        patch("talky.preflight.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.preflight.list_ollama_models", return_value=["qwen3.5:9b", "qwen3.5:14b"]),
+    ):
+        status = run_preflight_check(required_model="qwen3.5:9b")
+    assert status == OllamaStatus.READY

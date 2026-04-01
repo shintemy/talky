@@ -102,7 +102,10 @@ include_icon_view_settings = True
 # --- Volume icon (installer branding) ---
 _installer_icns = _project / "assets" / "installer.icns"
 _installer_png = _project / "assets" / "talky_installer.png"
-if _installer_icns.is_file():
+_installer_from_define = Path(str(defines.get("installer_icon", ""))).resolve() if defines.get("installer_icon") else None  # noqa: F821
+if _installer_from_define is not None and _installer_from_define.is_file():
+    icon = str(_installer_from_define)
+elif _installer_icns.is_file():
     icon = str(_installer_icns)
 elif _installer_png.is_file():
     icon = str(_installer_png)

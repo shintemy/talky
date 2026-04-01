@@ -11,6 +11,7 @@ import sounddevice as sd
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal, pyqtSlot
 
 from talky.config_store import AppConfigStore
+from talky.debug_log import append_debug_log
 from talky.dictionary_corrector import apply_phonetic_dictionary, normalize_person_pronouns
 from talky.dictionary_entries import (
     extract_person_terms,
@@ -25,13 +26,25 @@ from talky.models import AppSettings
 from talky.paster import ClipboardPaster
 from talky.permissions import check_ollama_reachable
 from talky.prompting import build_asr_initial_prompt
+from talky.processing_guard import (
+    estimate_asr_timeout_seconds,
+    estimate_processing_timeout_seconds,
+    should_timeout_processing,
+)
 from talky.recorder import AudioRecorder
 from talky.remote_service import CloudProcessService
+from talky.task_timeout import run_with_timeout
 from talky.text_guard import (
     collapse_duplicate_output,
     enforce_pronoun_consistency,
     enforce_source_boundaries,
 )
+from talky.wake_guard import (
+    normalize_wake_guard_threshold,
+    should_mark_suspected_false_positive,
+    should_rebuild_hotkey,
+)
+from talky.warmup_policy import should_warm_up_asr
 
 if TYPE_CHECKING:
     from talky.asr_service import MlxWhisperASR
@@ -40,6 +53,11 @@ _OPENCC_SIMPLIFIER = None
 _MIN_RECORD_DURATION_S = 0.30
 _MIN_RECORD_RMS = 0.003
 _HOTKEY_COOLDOWN_S = 0.45
+_WAKE_GUARD_INTERVAL_MS = 5000
+_PROCESSING_WATCHDOG_INTERVAL_MS = 1000
+_PROCESSING_TIMEOUT_S = 45.0
+_ASR_STEP_TIMEOUT_S = 35.0
+_LLM_STEP_TIMEOUT_S = 25.0
 
 
 def normalize_to_simplified_chinese(text: str) -> str:
@@ -61,6 +79,7 @@ def normalize_to_simplified_chinese(text: str) -> str:
 class AppController(QObject):
     status_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
+    pipeline_state_signal = pyqtSignal(str)
     settings_updated = pyqtSignal(object)
     show_result_popup_signal = pyqtSignal(str)
     show_settings_window_signal = pyqtSignal()
@@ -83,9 +102,13 @@ class AppController(QObject):
             debug_stream=self.settings.llm_debug_stream,
         )
         self.paster = ClipboardPaster(paste_delay_ms=self.settings.auto_paste_delay_ms)
-        self.history_store = HistoryStore(
-            Path(__file__).resolve().parent.parent / "history"
-        )
+        self.history_store = HistoryStore(Path.home() / ".talky" / "history")
+        # Keep user history persistent across app upgrades/re-installs.
+        legacy_dirs = [
+            Path(__file__).resolve().parent.parent / "history",
+            Path.cwd() / "history",
+        ]
+        self.history_store.migrate_from(legacy_dirs)
         self.cloud_service: CloudProcessService | None = self._build_cloud_service()
 
         self.paste_to_front_signal.connect(
@@ -99,6 +122,15 @@ class AppController(QObject):
         self._last_output_text = ""
         self._last_output_ts = 0.0
         self._hotkey_cooldown_until_ts = 0.0
+        self._wake_guard_timer: QTimer | None = None
+        self._last_wake_guard_tick_ts = time.monotonic()
+        self._last_wake_guard_rebuild_ts = 0.0
+        self._last_pipeline_state = "idle"
+        self._processing_watchdog_timer: QTimer | None = None
+        self._processing_started_ts = 0.0
+        self._processing_timeout_s = _PROCESSING_TIMEOUT_S
+        self._processing_generation = 0
+        self._processing_wav_path: Path | None = None
 
     def _get_asr(self) -> MlxWhisperASR:
         if self.is_cloud_mode:
@@ -118,12 +150,21 @@ class AppController(QObject):
 
     def start(self) -> None:
         self._start_hotkey()
+        self._start_wake_guard()
+        self._start_processing_watchdog()
+        self._emit_pipeline_state("idle", source="start")
         self._warm_up_models_async()
 
     def request_show_settings(self) -> None:
         self.show_settings_window_signal.emit()
 
     def stop(self) -> None:
+        if self._processing_watchdog_timer is not None:
+            self._processing_watchdog_timer.stop()
+            self._processing_watchdog_timer = None
+        if self._wake_guard_timer is not None:
+            self._wake_guard_timer.stop()
+            self._wake_guard_timer = None
         if self.hotkey:
             self.hotkey.stop()
             self.hotkey = None
@@ -201,6 +242,72 @@ class AppController(QObject):
         )
         self.hotkey.start()
         QTimer.singleShot(350, self._notify_hotkey_status_after_start)
+        self._last_wake_guard_tick_ts = time.monotonic()
+
+    def _start_wake_guard(self) -> None:
+        if self._wake_guard_timer is not None:
+            self._wake_guard_timer.stop()
+        timer = QTimer(self)
+        timer.setInterval(_WAKE_GUARD_INTERVAL_MS)
+        timer.timeout.connect(self._on_wake_guard_tick)
+        timer.start()
+        self._wake_guard_timer = timer
+        self._last_wake_guard_tick_ts = time.monotonic()
+
+    def _wake_guard_threshold(self) -> float:
+        return normalize_wake_guard_threshold(self.settings.wake_guard_gap_threshold_s)
+
+    def _record_wake_guard_rebuild(self, now_ts: float) -> None:
+        self.settings.wake_guard_rebuild_count += 1
+        if should_mark_suspected_false_positive(
+            last_rebuild_ts=self._last_wake_guard_rebuild_ts,
+            now_ts=now_ts,
+        ):
+            self.settings.wake_guard_suspected_false_positive_count += 1
+        self._last_wake_guard_rebuild_ts = now_ts
+        self.config_store.save(self.settings)
+
+    def _on_wake_guard_tick(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_wake_guard_tick_ts
+        self._last_wake_guard_tick_ts = now
+        threshold = self._wake_guard_threshold()
+        if not should_rebuild_hotkey(elapsed, threshold):
+            return
+        if self._is_recording or self._is_processing:
+            return
+        # System sleep/wake often invalidates global key taps; proactively rebuild.
+        self._start_hotkey()
+        self._record_wake_guard_rebuild(now)
+        self.status_signal.emit(
+            "System wake detected. Hotkey listener refreshed. "
+            f"Wake-guard telemetry: {self.settings.wake_guard_suspected_false_positive_count}/"
+            f"{self.settings.wake_guard_rebuild_count} suspected false-positive."
+        )
+
+    def _start_processing_watchdog(self) -> None:
+        if self._processing_watchdog_timer is not None:
+            self._processing_watchdog_timer.stop()
+        timer = QTimer(self)
+        timer.setInterval(_PROCESSING_WATCHDOG_INTERVAL_MS)
+        timer.timeout.connect(self._on_processing_watchdog_tick)
+        timer.start()
+        self._processing_watchdog_timer = timer
+
+    def _on_processing_watchdog_tick(self) -> None:
+        if not self._is_processing or self._processing_started_ts <= 0:
+            return
+        elapsed = time.monotonic() - self._processing_started_ts
+        if not should_timeout_processing(elapsed, self._processing_timeout_s):
+            return
+        append_debug_log(
+            "processing watchdog timeout: "
+            f"elapsed={elapsed:.1f}s; timeout={self._processing_timeout_s:.1f}s"
+        )
+        self._cancel_processing("processing_timeout")
+        self.error_signal.emit(
+            "Processing timeout. Current task was cancelled. Please retry."
+        )
 
     def _notify_hotkey_status_after_start(self) -> None:
         hotkey = self.hotkey
@@ -220,7 +327,10 @@ class AppController(QObject):
     def _on_hotkey_pressed(self) -> None:
         if time.monotonic() < self._hotkey_cooldown_until_ts:
             return
-        if self._is_processing or self._is_recording:
+        if self._is_processing:
+            self._cancel_processing("hotkey_pressed_during_processing")
+            return
+        if self._is_recording:
             return
         if not self.is_cloud_mode and not self._get_asr().is_model_available():
             self.error_signal.emit("__MODEL_NOT_FOUND__")
@@ -228,6 +338,7 @@ class AppController(QObject):
         try:
             self.recorder.start()
             self._is_recording = True
+            self._emit_pipeline_state("recording", source="hotkey_pressed")
             self.status_signal.emit("Recording started...")
         except sd.PortAudioError as exc:
             self.error_signal.emit(
@@ -251,26 +362,63 @@ class AppController(QObject):
                     f"Recording too short ({duration_s*1000:.0f}ms). Ignored."
                 )
                 wav_path.unlink(missing_ok=True)
+                self._emit_pipeline_state("idle", source="record_too_short")
                 return
             if rms < _MIN_RECORD_RMS:
                 self.status_signal.emit(
                     f"Audio too quiet (rms={rms:.4f}). Ignored."
                 )
                 wav_path.unlink(missing_ok=True)
+                self._emit_pipeline_state("idle", source="record_too_quiet")
                 return
             self.status_signal.emit("Recording stopped. Processing...")
+            self._emit_pipeline_state("processing", source="record_released")
             self._is_processing = True
+            self._processing_started_ts = time.monotonic()
+            asr_timeout_s = max(_ASR_STEP_TIMEOUT_S, estimate_asr_timeout_seconds(duration_s))
+            self._processing_timeout_s = max(
+                _PROCESSING_TIMEOUT_S,
+                estimate_processing_timeout_seconds(
+                    duration_s,
+                    llm_timeout_seconds=_LLM_STEP_TIMEOUT_S,
+                ),
+            )
+            append_debug_log(
+                "processing timeout policy: "
+                f"audio_duration={duration_s:.2f}s; asr_timeout={asr_timeout_s:.1f}s; "
+                f"overall_timeout={self._processing_timeout_s:.1f}s"
+            )
+            self._processing_wav_path = wav_path
+            self._processing_generation += 1
+            generation = self._processing_generation
             worker = threading.Thread(
                 target=self._process_pipeline,
-                args=(wav_path,),
+                args=(wav_path, generation, asr_timeout_s),
                 daemon=True,
             )
             worker.start()
         except Exception as exc:
             self._is_recording = False
+            self._emit_pipeline_state("idle", source="record_stop_error")
             self.error_signal.emit(f"Failed to stop recording: {exc}")
         finally:
             self._hotkey_cooldown_until_ts = time.monotonic() + _HOTKEY_COOLDOWN_S
+
+    def _cancel_processing(self, source: str) -> None:
+        # Invalidate current task so stale worker completion won't overwrite state.
+        self._processing_generation += 1
+        self._is_processing = False
+        self._processing_started_ts = 0.0
+        append_debug_log(f"processing cancelled: source={source}")
+        self._emit_pipeline_state("idle", source=source)
+        self.status_signal.emit("Current processing cancelled.")
+        wav_path = self._processing_wav_path
+        self._processing_wav_path = None
+        if wav_path is not None:
+            try:
+                wav_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def _process_cloud(self, wav_path: Path) -> str:
         assert self.cloud_service is not None
@@ -288,7 +436,7 @@ class AppController(QObject):
         final_text = normalize_to_simplified_chinese(final_text)
         return final_text
 
-    def _process_local(self, wav_path: Path) -> str:
+    def _process_local(self, wav_path: Path, *, asr_timeout_s: float) -> str:
         ok, error = check_ollama_reachable()
         if not ok:
             host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -311,7 +459,11 @@ class AppController(QObject):
         person_terms = extract_person_terms(dictionary_entries)
         asr_prompt = build_asr_initial_prompt(dict_terms)
         asr_start = time.perf_counter()
-        raw_text = self._get_asr().transcribe(wav_path, initial_prompt=asr_prompt)
+        raw_text = run_with_timeout(
+            lambda: self._get_asr().transcribe(wav_path, initial_prompt=asr_prompt),
+            asr_timeout_s,
+            label="ASR step",
+        )
         asr_elapsed = time.perf_counter() - asr_start
         print(f"[Talky] ASR elapsed: {asr_elapsed:.2f}s")
         if not raw_text:
@@ -322,10 +474,14 @@ class AppController(QObject):
             return ""
 
         llm_start = time.perf_counter()
-        final_text = self.llm.clean(
-            raw_text=corrected_raw_text,
-            dictionary_terms=dict_terms,
-            custom_prompt_template=self.settings.custom_llm_prompt,
+        final_text = run_with_timeout(
+            lambda: self.llm.clean(
+                raw_text=corrected_raw_text,
+                dictionary_terms=dict_terms,
+                custom_prompt_template=self.settings.custom_llm_prompt,
+            ),
+            _LLM_STEP_TIMEOUT_S,
+            label="LLM step",
         )
         llm_elapsed = time.perf_counter() - llm_start
         print(f"[Talky] LLM elapsed: {llm_elapsed:.2f}s")
@@ -337,12 +493,16 @@ class AppController(QObject):
         final_text = normalize_to_simplified_chinese(final_text)
         return final_text
 
-    def _process_pipeline(self, wav_path: Path) -> None:
+    def _process_pipeline(self, wav_path: Path, generation: int, asr_timeout_s: float) -> None:
         try:
+            if generation != self._processing_generation:
+                return
             if self.is_cloud_mode:
                 final_text = self._process_cloud(wav_path)
             else:
-                final_text = self._process_local(wav_path)
+                final_text = self._process_local(wav_path, asr_timeout_s=asr_timeout_s)
+            if generation != self._processing_generation:
+                return
             if not final_text:
                 return
 
@@ -372,11 +532,27 @@ class AppController(QObject):
         except Exception as exc:
             self.error_signal.emit(f"Processing failed: {exc}")
         finally:
-            self._is_processing = False
+            if generation == self._processing_generation:
+                self._is_processing = False
+                self._processing_started_ts = 0.0
+                self._processing_timeout_s = _PROCESSING_TIMEOUT_S
+                self._processing_wav_path = None
+                self._emit_pipeline_state("idle", source="pipeline_finally")
             try:
                 wav_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+    def _emit_pipeline_state(self, state: str, *, source: str) -> None:
+        previous = self._last_pipeline_state
+        self._last_pipeline_state = state
+        append_debug_log(
+            "pipeline_state_emit: "
+            f"{previous}->{state}; source={source}; "
+            f"is_recording={self._is_recording}; is_processing={self._is_processing}; "
+            f"hotkey={self.settings.hotkey}"
+        )
+        self.pipeline_state_signal.emit(state)
 
     def _warm_up_models_async(self) -> None:
         if self.is_cloud_mode:
@@ -385,13 +561,16 @@ class AppController(QObject):
         worker.start()
 
     def _warm_up_models(self) -> None:
-        try:
-            warm_asr_start = time.perf_counter()
-            self._get_asr().warm_up()
-            warm_asr_elapsed = time.perf_counter() - warm_asr_start
-            print(f"[Talky] Whisper warm-up done: {warm_asr_elapsed:.2f}s")
-        except Exception as exc:
-            print(f"[Talky] Whisper warm-up failed: {exc}")
+        if should_warm_up_asr():
+            try:
+                warm_asr_start = time.perf_counter()
+                self._get_asr().warm_up()
+                warm_asr_elapsed = time.perf_counter() - warm_asr_start
+                print(f"[Talky] Whisper warm-up done: {warm_asr_elapsed:.2f}s")
+            except Exception as exc:
+                print(f"[Talky] Whisper warm-up failed: {exc}")
+        else:
+            append_debug_log("Whisper warm-up skipped at startup (TALKY_ASR_WARMUP not enabled).")
 
         try:
             warm_llm_start = time.perf_counter()

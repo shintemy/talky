@@ -137,3 +137,89 @@ def test_show_returning_user_prompt_no_model_then_ok():
             config_store=store,
         )
         assert result is True
+
+
+def test_show_returning_user_prompt_blocks_unsafe_model_pull():
+    from talky.onboarding import OllamaStatus, show_returning_user_prompt
+
+    store = MagicMock()
+    store.load.return_value = MagicMock(ollama_host="http://127.0.0.1:11434")
+    bind_btn = MagicMock(name="bind")
+    pull_btn = MagicMock(name="pull")
+    recheck_btn = MagicMock(name="recheck")
+    quit_btn = MagicMock(name="quit")
+
+    with (
+        patch("talky.onboarding.QMessageBox") as mock_box,
+        patch("talky.onboarding.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.onboarding.list_ollama_models", return_value=["qwen3.5:9b"]),
+        patch("talky.onboarding.subprocess.Popen") as popen,
+    ):
+        mock_box.Icon = MagicMock()
+        mock_box.ButtonRole = MagicMock()
+        instance = mock_box.return_value
+        instance.addButton.side_effect = [
+            bind_btn,
+            pull_btn,
+            recheck_btn,
+            quit_btn,
+            bind_btn,
+            pull_btn,
+            recheck_btn,
+            quit_btn,
+        ]
+        instance.clickedButton.side_effect = [pull_btn, quit_btn]
+        result = show_returning_user_prompt(
+            OllamaStatus.NO_MODEL,
+            locale="en",
+            config_store=store,
+            expected_model='bad;rm -rf /',
+        )
+        assert result is False
+        popen.assert_not_called()
+        mock_box.warning.assert_called()
+
+
+def test_show_returning_user_prompt_bind_requires_explicit_confirmation():
+    from talky.onboarding import OllamaStatus, show_returning_user_prompt
+
+    store = MagicMock()
+    store.load.return_value = MagicMock(
+        ollama_host="http://127.0.0.1:11434",
+        ollama_model="qwen3.5:9b",
+    )
+    bind_btn = MagicMock(name="bind")
+    pull_btn = MagicMock(name="pull")
+    recheck_btn = MagicMock(name="recheck")
+    quit_btn = MagicMock(name="quit")
+
+    with (
+        patch("talky.onboarding.QMessageBox") as mock_box,
+        patch("talky.onboarding.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.onboarding.list_ollama_models", return_value=["qwen3.5:14b"]),
+        patch("talky.onboarding.confirm_bind_available_model", side_effect=[False, True]) as mock_confirm,
+    ):
+        mock_box.Icon = MagicMock()
+        mock_box.ButtonRole = MagicMock()
+        instance = mock_box.return_value
+        instance.addButton.side_effect = [
+            bind_btn,
+            pull_btn,
+            recheck_btn,
+            quit_btn,
+            bind_btn,
+            pull_btn,
+            recheck_btn,
+            quit_btn,
+        ]
+        instance.clickedButton.side_effect = [bind_btn, bind_btn]
+        result = show_returning_user_prompt(
+            OllamaStatus.NO_MODEL,
+            locale="en",
+            config_store=store,
+            expected_model="qwen3.5:9b",
+        )
+        assert result is True
+        assert mock_confirm.call_count == 2
+        saved_settings = store.save.call_args[0][0]
+        assert saved_settings.ollama_model == "qwen3.5:14b"

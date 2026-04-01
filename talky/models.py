@@ -56,6 +56,9 @@ class AppSettings:
     cloud_api_url: str = ""
     cloud_api_key: str = ""
     custom_llm_prompt: str = ""
+    wake_guard_gap_threshold_s: float = 20.0
+    wake_guard_rebuild_count: int = 0
+    wake_guard_suspected_false_positive_count: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
@@ -82,6 +85,11 @@ class AppSettings:
             cloud_api_url=str(data.get("cloud_api_url", "")),
             cloud_api_key=str(data.get("cloud_api_key", "")),
             custom_llm_prompt=str(data.get("custom_llm_prompt", "")),
+            wake_guard_gap_threshold_s=float(data.get("wake_guard_gap_threshold_s", 20.0)),
+            wake_guard_rebuild_count=int(data.get("wake_guard_rebuild_count", 0)),
+            wake_guard_suspected_false_positive_count=int(
+                data.get("wake_guard_suspected_false_positive_count", 0)
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:

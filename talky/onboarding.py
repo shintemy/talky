@@ -1,41 +1,11 @@
 from __future__ import annotations
 
-import enum
-import locale
+import os
 
-from talky.models import AppSettings, detect_ollama_model
-from talky.permissions import check_ollama_reachable, is_ollama_installed
-
-
-class OllamaStatus(enum.Enum):
-    READY = "ready"
-    NOT_INSTALLED = "not_installed"
-    NOT_RUNNING = "not_running"
-    NO_MODEL = "no_model"
-
-
-def run_preflight_check() -> OllamaStatus:
-    """Check Ollama installation, service, and model availability."""
-    installed = is_ollama_installed()
-    reachable, _ = check_ollama_reachable()
-    if not installed and not reachable:
-        return OllamaStatus.NOT_INSTALLED
-    if not reachable:
-        return OllamaStatus.NOT_RUNNING
-    if not detect_ollama_model():
-        return OllamaStatus.NO_MODEL
-    return OllamaStatus.READY
-
-
-def detect_system_locale() -> str:
-    """Return 'zh' if macOS system language is Chinese, else 'en'."""
-    try:
-        lang, _ = locale.getlocale()
-        if lang and lang.startswith("zh"):
-            return "zh"
-    except Exception:
-        pass
-    return "en"
+from talky.models import AppSettings, list_ollama_models
+from talky.model_name_guard import apple_script_escape, build_pull_command, is_safe_ollama_model_name
+from talky.preflight import OllamaStatus, detect_system_locale, run_preflight_check
+from talky.permissions import check_ollama_reachable
 
 
 # ---------------------------------------------------------------------------
@@ -1007,6 +977,7 @@ def show_returning_user_prompt(
     *,
     locale: str = "en",
     config_store: AppConfigStore,
+    expected_model: str = "",
 ) -> bool:
     """Show blocking prompts that loop until Ollama is ready. Returns True if resolved."""
     import subprocess
@@ -1062,7 +1033,7 @@ def show_returning_user_prompt(
                     continue
                 settings = config_store.load()
                 _apply_ollama_host_env_from_settings(settings)
-                status = run_preflight_check()
+                status = run_preflight_check(required_model=settings.ollama_model)
                 if status == OllamaStatus.READY:
                     return True
                 if status == OllamaStatus.NO_MODEL:
@@ -1103,10 +1074,95 @@ def show_returning_user_prompt(
         if box.clickedButton() == quit_btn:
             return False
 
-    # --- Step 3: No model → loop until model exists ---
+    # --- Step 3: No model / configured model missing ---
+    required_model = (expected_model or "").strip()
     models = list_ollama_models()
-    if models:
+    if models and (not required_model or required_model in models):
         return True
+
+    if models and required_model and required_model not in models:
+        while True:
+            box = QMessageBox()
+            box.setWindowTitle("Talky")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(
+                f"当前绑定模型不可用：{required_model}" if zh
+                else f"Configured model is unavailable: {required_model}"
+            )
+            host = (config_store.load().ollama_host or "http://127.0.0.1:11434").strip().rstrip("/")
+            if not host:
+                host = "http://127.0.0.1:11434"
+            sample = ", ".join(models[:3]) if models else ("（无）" if zh else "(none)")
+            box.setInformativeText(
+                (
+                    "当前地址：{host}\n"
+                    "缺失模型：{model}\n"
+                    "可用模型：{sample}\n\n"
+                    "可选择绑定到当前可用模型，或先下载原模型。"
+                ).format(host=host, model=required_model, sample=sample)
+                if zh
+                else (
+                    "Configured host: {host}\n"
+                    "Missing model: {model}\n"
+                    "Available models: {sample}\n\n"
+                    "You can bind to an available model now, or download the original model first."
+                ).format(host=host, model=required_model, sample=sample)
+            )
+            bind_btn = box.addButton(
+                "绑定到可用模型" if zh else "Bind available model",
+                QMessageBox.ButtonRole.AcceptRole,
+            )
+            pull_btn = box.addButton(
+                "下载当前绑定模型" if zh else "Download configured model",
+                QMessageBox.ButtonRole.ActionRole,
+            )
+            recheck_btn = box.addButton(
+                "重新检测" if zh else "Re-check",
+                QMessageBox.ButtonRole.ActionRole,
+            )
+            quit_btn = box.addButton("退出" if zh else "Quit", QMessageBox.ButtonRole.NoRole)
+            box.setDefaultButton(bind_btn)
+            prepare_qt_modal_for_macos(box)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked == quit_btn:
+                return False
+            if clicked == pull_btn:
+                if not is_safe_ollama_model_name(required_model):
+                    QMessageBox.warning(
+                        None,
+                        "Talky",
+                        "模型名包含非法字符，已阻止自动执行。请在设置中重新选择模型。"
+                        if zh
+                        else "Model name contains unsafe characters. Auto-run was blocked. Please reselect a model in Settings.",
+                    )
+                    continue
+                pull_cmd = build_pull_command(required_model)
+                script = f'tell application "Terminal" to do script "{apple_script_escape(pull_cmd)}"'
+                subprocess.Popen(["osascript", "-e", script])  # noqa: S603, S607
+                continue
+            models = list_ollama_models()
+            if clicked == recheck_btn:
+                if required_model in models:
+                    return True
+                continue
+            if clicked == bind_btn and models:
+                target_model = models[0]
+                if not confirm_bind_available_model(
+                    locale=locale,
+                    from_model=required_model,
+                    to_model=target_model,
+                    host=host,
+                ):
+                    continue
+                settings = config_store.load()
+                settings.ollama_model = target_model
+                config_store.save(settings)
+                os.environ["OLLAMA_HOST"] = (
+                    (settings.ollama_host or "http://127.0.0.1:11434").strip().rstrip("/")
+                    or "http://127.0.0.1:11434"
+                )
+                return True
 
     rec = load_recommended_ollama_config()
     pull_cmd = rec.pull_command_resolved()
@@ -1143,3 +1199,25 @@ def show_returning_user_prompt(
         models = list_ollama_models()
         if models:
             return True
+
+
+def confirm_bind_available_model(*, locale: str, from_model: str, to_model: str, host: str) -> bool:
+    zh = locale == "zh"
+    title = "确认模型切换" if zh else "Confirm model switch"
+    text = (
+        "将把当前绑定模型切换到：{to_model}\n原绑定模型：{from_model}\nHost：{host}"
+        if zh
+        else "This will switch the configured model to: {to_model}\nCurrent configured model: {from_model}\nHost: {host}"
+    ).format(
+        to_model=to_model,
+        from_model=from_model or ("（空）" if zh else "(empty)"),
+        host=host or "http://127.0.0.1:11434",
+    )
+    result = QMessageBox.question(
+        None,
+        title,
+        text,
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    return result == QMessageBox.StandardButton.Yes

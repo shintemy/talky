@@ -4,6 +4,20 @@ import threading
 from collections.abc import Callable
 
 
+def _safe_join_thread(worker: threading.Thread | None, timeout_s: float = 1.0) -> None:
+    if worker is None:
+        return
+    try:
+        is_alive = getattr(worker, "is_alive", None)
+        if callable(is_alive) and not is_alive():
+            return
+        join = getattr(worker, "join", None)
+        if callable(join):
+            join(timeout_s)
+    except Exception:
+        pass
+
+
 def label_for_hotkey_tokens(tokens: list[str]) -> str:
     labels = {
         "alt": "Option",
@@ -55,6 +69,7 @@ class HoldToTalkHotkey:
         self._pressed = False
         self._quartz_thread: threading.Thread | None = None
         self._run_loop = None
+        self._tap = None
         self._using_fallback = False
 
     @property
@@ -90,6 +105,7 @@ class HoldToTalkHotkey:
         self._start_modifier_quartz_listener(required={"alt"})
 
     def stop(self) -> None:
+        thread = self._quartz_thread
         if self._run_loop is not None:
             try:
                 from CoreFoundation import CFRunLoopStop
@@ -98,6 +114,17 @@ class HoldToTalkHotkey:
             except Exception:
                 pass
             self._run_loop = None
+        if self._tap is not None:
+            try:
+                import Quartz
+
+                invalidate = getattr(Quartz, "CFMachPortInvalidate", None)
+                if callable(invalidate):
+                    invalidate(self._tap)
+            except Exception:
+                pass
+            self._tap = None
+        _safe_join_thread(thread)
         self._quartz_thread = None
         self._pressed = False
 
@@ -113,10 +140,43 @@ class HoldToTalkHotkey:
         ctrl_mask = getattr(Quartz, "kCGEventFlagMaskControl", 0)
         shift_mask = getattr(Quartz, "kCGEventFlagMaskShift", 0)
         fn_mask = getattr(Quartz, "kCGEventFlagMaskSecondaryFn", 0)
+        tap_disabled_timeout = getattr(Quartz, "kCGEventTapDisabledByTimeout", None)
+        tap_disabled_user_input = getattr(Quartz, "kCGEventTapDisabledByUserInput", None)
+
+        # Initialize pressed state from current global flags. This prevents
+        # phantom "pressed" transitions right after startup when modifier state
+        # is already active or stale across sleep/wake.
+        try:
+            source_state = getattr(Quartz, "kCGEventSourceStateCombinedSessionState", 0)
+            current_flags = Quartz.CGEventSourceFlagsState(source_state)
+        except Exception:
+            current_flags = 0
+        current_mods: set[str] = set()
+        if current_flags & alt_mask:
+            current_mods.add("alt")
+        if current_flags & cmd_mask:
+            current_mods.add("cmd")
+        if current_flags & ctrl_mask:
+            current_mods.add("ctrl")
+        if current_flags & shift_mask:
+            current_mods.add("shift")
+        if fn_mask and (current_flags & fn_mask):
+            current_mods.add("fn")
+        self._pressed = required.issubset(current_mods)
 
         def _run_event_tap() -> None:
+            tap_ref = {"tap": None}
+
             def _callback(proxy, event_type, event, refcon):
                 del proxy, refcon
+                if event_type in {tap_disabled_timeout, tap_disabled_user_input}:
+                    tap = tap_ref["tap"]
+                    if tap is not None:
+                        try:
+                            Quartz.CGEventTapEnable(tap, True)
+                        except Exception:
+                            pass
+                    return event
                 if event_type != Quartz.kCGEventFlagsChanged:
                     return event
 
@@ -151,8 +211,10 @@ class HoldToTalkHotkey:
                 _callback,
                 None,
             )
+            tap_ref["tap"] = tap
             if tap is None:
                 return
+            self._tap = tap
 
             source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
             run_loop = CFRunLoopGetCurrent()
@@ -174,10 +236,30 @@ class HoldToTalkHotkey:
         fn_mask = getattr(Quartz, "kCGEventFlagMaskSecondaryFn", None)
         if fn_mask is None:
             return False
+        tap_disabled_timeout = getattr(Quartz, "kCGEventTapDisabledByTimeout", None)
+        tap_disabled_user_input = getattr(Quartz, "kCGEventTapDisabledByUserInput", None)
+
+        # Seed pressed state from current flags to avoid startup false-positive.
+        try:
+            source_state = getattr(Quartz, "kCGEventSourceStateCombinedSessionState", 0)
+            current_flags = Quartz.CGEventSourceFlagsState(source_state)
+        except Exception:
+            current_flags = 0
+        self._pressed = bool(current_flags & fn_mask)
 
         def _run_event_tap() -> None:
+            tap_ref = {"tap": None}
+
             def _callback(proxy, event_type, event, refcon):
                 del proxy, refcon
+                if event_type in {tap_disabled_timeout, tap_disabled_user_input}:
+                    tap = tap_ref["tap"]
+                    if tap is not None:
+                        try:
+                            Quartz.CGEventTapEnable(tap, True)
+                        except Exception:
+                            pass
+                    return event
                 if event_type != Quartz.kCGEventFlagsChanged:
                     return event
                 flags = Quartz.CGEventGetFlags(event)
@@ -199,10 +281,12 @@ class HoldToTalkHotkey:
                 _callback,
                 None,
             )
+            tap_ref["tap"] = tap
             if tap is None:
                 self._using_fallback = True
                 self._start_modifier_quartz_listener(required={"alt"})
                 return
+            self._tap = tap
 
             source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
             run_loop = CFRunLoopGetCurrent()
@@ -227,6 +311,7 @@ class GlobalShortcutListener:
         self.on_trigger = on_trigger
         self._quartz_thread: threading.Thread | None = None
         self._run_loop = None
+        self._tap = None
         self._triggered_while_held = False
 
     def start(self) -> None:
@@ -241,10 +326,22 @@ class GlobalShortcutListener:
         alt_mask = getattr(Quartz, "kCGEventFlagMaskAlternate", 0)
         cmd_mask = getattr(Quartz, "kCGEventFlagMaskCommand", 0)
         ctrl_mask = getattr(Quartz, "kCGEventFlagMaskControl", 0)
+        tap_disabled_timeout = getattr(Quartz, "kCGEventTapDisabledByTimeout", None)
+        tap_disabled_user_input = getattr(Quartz, "kCGEventTapDisabledByUserInput", None)
 
         def _run_event_tap() -> None:
+            tap_ref = {"tap": None}
+
             def _callback(proxy, event_type, event, refcon):
                 del proxy, refcon
+                if event_type in {tap_disabled_timeout, tap_disabled_user_input}:
+                    tap = tap_ref["tap"]
+                    if tap is not None:
+                        try:
+                            Quartz.CGEventTapEnable(tap, True)
+                        except Exception:
+                            pass
+                    return event
                 if event_type != Quartz.kCGEventFlagsChanged:
                     return event
                 flags = Quartz.CGEventGetFlags(event)
@@ -265,8 +362,10 @@ class GlobalShortcutListener:
                 _callback,
                 None,
             )
+            tap_ref["tap"] = tap
             if tap is None:
                 return
+            self._tap = tap
             source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
             run_loop = CFRunLoopGetCurrent()
             self._run_loop = run_loop
@@ -278,6 +377,7 @@ class GlobalShortcutListener:
         self._quartz_thread.start()
 
     def stop(self) -> None:
+        thread = self._quartz_thread
         if self._run_loop is not None:
             try:
                 from CoreFoundation import CFRunLoopStop
@@ -286,5 +386,16 @@ class GlobalShortcutListener:
             except Exception:
                 pass
             self._run_loop = None
+        if self._tap is not None:
+            try:
+                import Quartz
+
+                invalidate = getattr(Quartz, "CFMachPortInvalidate", None)
+                if callable(invalidate):
+                    invalidate(self._tap)
+            except Exception:
+                pass
+            self._tap = None
+        _safe_join_thread(thread)
         self._quartz_thread = None
         self._triggered_while_held = False

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
-from talky.macos_ui import activate_foreground_app
+from talky.macos_ui import activate_foreground_app, install_dock_reopen_handler
 from talky.permissions import (
     check_microphone_granted,
     is_accessibility_trusted,
@@ -294,6 +294,7 @@ def main() -> int:
     settings_window = SettingsWindow(controller=controller)
     tray_app = TrayApp(controller=controller, settings_window=settings_window)
     install_signal_handlers(tray_app=tray_app, controller=controller)
+    install_dock_reopen_handler(tray_app.show_settings)
 
     def _cleanup_on_quit() -> None:
         """Kill child processes so macOS doesn't think the app is still alive."""
@@ -354,7 +355,6 @@ def main() -> int:
             )
         except Exception:
             pass
-        tray_app.show_settings()
 
     from PyQt6.QtCore import QTimer
 

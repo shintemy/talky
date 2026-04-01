@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 
 from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import (
 from talky.config_store import AppConfigStore
 from talky.macos_ui import activate_foreground_app, prepare_qt_modal_for_macos
 from talky.models import AppSettings
+from talky.preflight import OllamaStatus, detect_system_locale, run_preflight_check
 from talky.remote_service import verify_cloud_server
 
 
@@ -27,6 +29,92 @@ def apply_ollama_host_from_settings(settings: AppSettings) -> None:
     if not host:
         host = "http://127.0.0.1:11434"
     os.environ["OLLAMA_HOST"] = host
+
+
+def _is_local_ollama_host(host: str) -> bool:
+    value = (host or "").strip().lower()
+    return value in {
+        "",
+        "http://127.0.0.1:11434",
+        "http://localhost:11434",
+        "http://[::1]:11434",
+    }
+
+
+def _build_unready_local_prompt(
+    *,
+    status: OllamaStatus,
+    mode: str,
+    host: str,
+    zh: bool,
+) -> tuple[str, str, bool, bool, bool]:
+    """Build copy and button visibility for local/remote Ollama warning.
+
+    Returns:
+        (title, body, show_remote_button, show_download_button, show_open_button)
+    """
+    if status == OllamaStatus.NOT_INSTALLED:
+        title = (
+            "本地模式未检测到 Ollama。"
+            if zh and mode == "local"
+            else "Local mode requires Ollama on this Mac."
+            if mode == "local"
+            else "Ollama service is not available."
+        )
+        if mode == "local":
+            body = (
+                f"当前地址：{host}\n\n请先安装并启动 Ollama。你可以点击「打开 Ollama」，"
+                "或在终端运行 `ollama serve`。"
+                if zh
+                else f"Host: {host}\n\nPlease install and start Ollama on this Mac. "
+                "Click 'Open Ollama', or run `ollama serve` in Terminal."
+            )
+        else:
+            body = (
+                f"当前地址：{host}\n\n请确认该远端地址可访问，或点击「连接远端 Ollama…」重新配置。"
+                if zh
+                else f"Host: {host}\n\nVerify this remote host is reachable, or use "
+                "'Connect remote Ollama…' to reconfigure."
+            )
+        return title, body, mode == "remote", True, mode == "local"
+
+    if status == OllamaStatus.NOT_RUNNING:
+        if mode == "local":
+            title = "本地模式无法连接到 Ollama。" if zh else "Cannot reach local Ollama."
+            body = (
+                f"当前地址：{host}\n\n请启动 Ollama（可点击「打开 Ollama」），"
+                "或在终端运行 `ollama serve`。"
+                if zh
+                else f"Host: {host}\n\nStart Ollama (you can click 'Open Ollama'), "
+                "or run `ollama serve` in Terminal."
+            )
+            return title, body, False, False, _is_local_ollama_host(host)
+        title = "无法连接远端 Ollama。" if zh else "Cannot reach remote Ollama."
+        body = (
+            f"当前地址：{host}\n\n请确认远端 Ollama 已启动并且网络可达。"
+            if zh
+            else f"Host: {host}\n\nMake sure remote Ollama is running and reachable."
+        )
+        return title, body, True, False, False
+
+    title = (
+        "Ollama 已连接，但未检测到可用模型。"
+        if zh
+        else "Ollama is reachable but no models were found."
+    )
+    body = (
+        f"当前地址：{host}\n\n请在终端执行 `ollama pull <模型名>` 后再试录音。"
+        if zh
+        else f"Host: {host}\n\nRun `ollama pull <model>` in Terminal, then try again."
+    )
+    return title, body, mode == "remote", False, False
+
+
+def _try_open_local_ollama_app() -> None:
+    try:
+        subprocess.Popen(["open", "-a", "Ollama"])  # noqa: S603,S607
+    except Exception:
+        pass
 
 
 def alert_if_local_ollama_unready(config_store: AppConfigStore) -> bool:
@@ -42,14 +130,9 @@ def alert_if_local_ollama_unready(config_store: AppConfigStore) -> bool:
 
     apply_ollama_host_from_settings(settings)
 
-    from talky.onboarding import (
-        OllamaStatus,
-        RemoteOllamaConnectDialog,
-        detect_system_locale,
-        run_preflight_check,
-    )
+    from talky.onboarding import RemoteOllamaConnectDialog
 
-    status = run_preflight_check()
+    status = run_preflight_check(required_model=settings.ollama_model)
     if status == OllamaStatus.READY:
         return False
 
@@ -57,39 +140,12 @@ def alert_if_local_ollama_unready(config_store: AppConfigStore) -> bool:
     zh = locale == "zh"
     host = (settings.ollama_host or "http://127.0.0.1:11434").strip()
 
-    if status == OllamaStatus.NOT_INSTALLED:
-        main = (
-            "本地模式下未检测到可用的 Ollama 服务。"
-            if zh
-            else "Local mode needs a reachable Ollama service."
-        )
-        info = (
-            f"当前地址：{host}\n\n"
-            "本机未安装 Ollama 或无法连上该地址。请安装并启动 Ollama，或使用「连接远端」；"
-            "也可先在下方修改 Ollama Host 后保存。"
-            if zh
-            else f"Configured host: {host}\n\n"
-            "Ollama is not installed or this host is unreachable. Install and run Ollama, "
-            "or use Connect remote; you can also edit Ollama Host below and Save."
-        )
-    elif status == OllamaStatus.NOT_RUNNING:
-        main = "本地模式无法连接到 Ollama。" if zh else "Cannot reach Ollama (local mode)."
-        info = (
-            f"当前地址：{host}\n\n请确认该地址上的 Ollama 已启动，或修改 Ollama Host 后保存。"
-            if zh
-            else f"Host: {host}\n\nStart Ollama at that address, or change Ollama Host below and Save."
-        )
-    else:
-        main = (
-            "Ollama 已连接，但未检测到可用模型。"
-            if zh
-            else "Ollama is reachable but no models were found."
-        )
-        info = (
-            f"当前地址：{host}\n\n请在终端执行 `ollama pull <模型名>` 后再试录音。"
-            if zh
-            else f"Host: {host}\n\nRun `ollama pull <model>` in Terminal, then try again."
-        )
+    main, info, show_remote_btn, show_download_btn, show_open_btn = _build_unready_local_prompt(
+        status=status,
+        mode=settings.mode,
+        host=host,
+        zh=zh,
+    )
 
     box = QMessageBox()
     box.setWindowTitle("Talky")
@@ -97,24 +153,35 @@ def alert_if_local_ollama_unready(config_store: AppConfigStore) -> bool:
     box.setText(main)
     box.setInformativeText(info)
     btn_ok = box.addButton("知道了" if zh else "OK", QMessageBox.ButtonRole.AcceptRole)
-    btn_remote = box.addButton(
-        "连接远端 Ollama…" if zh else "Connect remote Ollama…",
-        QMessageBox.ButtonRole.ActionRole,
-    )
+    btn_remote = None
+    if show_remote_btn:
+        btn_remote = box.addButton(
+            "连接远端 Ollama…" if zh else "Connect remote Ollama…",
+            QMessageBox.ButtonRole.ActionRole,
+        )
     dl_btn = None
-    if status == OllamaStatus.NOT_INSTALLED:
+    if show_download_btn:
         dl_btn = box.addButton(
             "打开下载页" if zh else "Open download page",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+    open_btn = None
+    if show_open_btn:
+        open_btn = box.addButton(
+            "打开 Ollama" if zh else "Open Ollama",
             QMessageBox.ButtonRole.ActionRole,
         )
     box.setDefaultButton(btn_ok)
     prepare_qt_modal_for_macos(box)
     box.exec()
     clicked = box.clickedButton()
+    if open_btn is not None and clicked == open_btn:
+        _try_open_local_ollama_app()
+        return False
     if dl_btn is not None and clicked == dl_btn:
         QDesktopServices.openUrl(QUrl("https://ollama.com/download"))
         return False
-    if clicked == btn_remote:
+    if btn_remote is not None and clicked == btn_remote:
         dlg = RemoteOllamaConnectDialog(config_store, locale=locale)
         prepare_qt_modal_for_macos(dlg)
         if dlg.exec() == QDialog.DialogCode.Accepted:
@@ -125,17 +192,11 @@ def alert_if_local_ollama_unready(config_store: AppConfigStore) -> bool:
 def ensure_local_ollama_ready(config_store: AppConfigStore) -> bool:
     from PyQt6.QtWidgets import QDialog
 
-    from talky.onboarding import (
-        OllamaStatus,
-        OnboardingWizard,
-        detect_system_locale,
-        run_preflight_check,
-        show_returning_user_prompt,
-    )
+    from talky.onboarding import OnboardingWizard, show_returning_user_prompt
 
     settings = config_store.load()
     apply_ollama_host_from_settings(settings)
-    status = run_preflight_check()
+    status = run_preflight_check(required_model=settings.ollama_model)
     if status == OllamaStatus.READY:
         return True
 
@@ -154,7 +215,7 @@ def ensure_local_ollama_ready(config_store: AppConfigStore) -> bool:
             return False
         settings = config_store.load()
         apply_ollama_host_from_settings(settings)
-        if run_preflight_check() != OllamaStatus.READY:
+        if run_preflight_check(required_model=settings.ollama_model) != OllamaStatus.READY:
             QMessageBox.warning(
                 None,
                 "Talky",
@@ -166,11 +227,16 @@ def ensure_local_ollama_ready(config_store: AppConfigStore) -> bool:
         return True
 
     activate_foreground_app()
-    if not show_returning_user_prompt(status, locale=locale, config_store=config_store):
+    if not show_returning_user_prompt(
+        status,
+        locale=locale,
+        config_store=config_store,
+        expected_model=settings.ollama_model,
+    ):
         return False
     settings = config_store.load()
     apply_ollama_host_from_settings(settings)
-    if run_preflight_check() != OllamaStatus.READY:
+    if run_preflight_check(required_model=settings.ollama_model) != OllamaStatus.READY:
         QMessageBox.warning(
             None,
             "Talky",

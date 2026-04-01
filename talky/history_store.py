@@ -9,6 +9,29 @@ class HistoryStore:
     def __init__(self, history_dir: Path) -> None:
         self.history_dir = history_dir
 
+    def migrate_from(self, legacy_dirs: list[Path]) -> bool:
+        """
+        Copy legacy markdown history files into current history_dir once.
+        Returns True if any file was migrated.
+        """
+        migrated = False
+        self.history_dir.mkdir(parents=True, exist_ok=True)
+        for legacy_dir in legacy_dirs:
+            if legacy_dir.resolve() == self.history_dir.resolve():
+                continue
+            if not legacy_dir.exists() or not legacy_dir.is_dir():
+                continue
+            for src in legacy_dir.glob("*.md"):
+                dst = self.history_dir / src.name
+                if dst.exists():
+                    continue
+                try:
+                    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+                    migrated = True
+                except Exception:
+                    continue
+        return migrated
+
     def append(self, text: str, now: datetime | None = None) -> Path:
         timestamp = now or datetime.now()
         self.history_dir.mkdir(parents=True, exist_ok=True)

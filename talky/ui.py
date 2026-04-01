@@ -4,11 +4,23 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 import pyperclip
 from pathlib import Path
 
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QDesktopServices, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
+from PyQt6.QtGui import (
+    QAction,
+    QColor,
+    QCursor,
+    QDesktopServices,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QPixmap,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -149,6 +161,10 @@ _ZH = {
     "prompt_section_title": "LLM System Prompt",
     "prompt_hint": "使用 {dictionary} 插入自定义词典内容。留空则使用内置默认 Prompt。",
     "prompt_restore_default": "恢复默认",
+    "live_recording_title": "正在录音",
+    "live_recording_subtitle": "松开 Fn 结束录音",
+    "live_processing_title": "正在识别",
+    "live_processing_subtitle": "请稍候，马上粘贴",
 }
 
 
@@ -1896,12 +1912,26 @@ class ConfigsTab(QWidget):
             ollama_model=selected_model,
         )
         if not ok:
-            if not quiet:
-                QMessageBox.warning(self, "Talky", reason)
-                current_idx = self._mode_combo.findData(self.controller.settings.mode)
-                if current_idx >= 0:
-                    self._mode_combo.setCurrentIndex(current_idx)
-            return
+            if selected_mode in {"local", "remote"}:
+                append_debug_log(
+                    "Non-blocking mode validation warning while saving settings: "
+                    f"mode={selected_mode}; host={selected_host}; reason={reason}"
+                )
+                if not quiet:
+                    QMessageBox.warning(
+                        self,
+                        "Talky",
+                        reason
+                        + "\n\nSettings will still be saved. "
+                        "You can start Ollama later and retry.",
+                    )
+            else:
+                if not quiet:
+                    QMessageBox.warning(self, "Talky", reason)
+                    current_idx = self._mode_combo.findData(self.controller.settings.mode)
+                    if current_idx >= 0:
+                        self._mode_combo.setCurrentIndex(current_idx)
+                return
 
         settings = AppSettings(
             custom_dictionary=self.controller.settings.custom_dictionary,
@@ -2094,11 +2124,13 @@ class TrayApp:
         self.controller = controller
         self.settings_window = settings_window
         self.result_popup = ResultPopupWindow()
+        self.live_status_widget = LiveStatusWidget()
         self._last_error_message = ""
         self.dictionary_shortcut_listener = GlobalShortcutListener(
             on_trigger=self.controller.request_show_settings
         )
         self._ready_for_tray_click = False
+        self._last_consumed_show_settings_signal_mtime_ns = 0
 
         icon = self._load_tray_icon()
         self.tray = QSystemTrayIcon(icon)
@@ -2124,12 +2156,25 @@ class TrayApp:
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self._on_tray_activated)
 
-        self.controller.status_signal.connect(self._show_status)
+        self.controller.status_signal.connect(
+            self._show_status,
+            Qt.ConnectionType.QueuedConnection,
+        )
         self.controller.error_signal.connect(
             self._show_error, Qt.ConnectionType.QueuedConnection
         )
-        self.controller.show_result_popup_signal.connect(self._show_result_popup)
-        self.controller.show_settings_window_signal.connect(self.show_settings)
+        self.controller.show_result_popup_signal.connect(
+            self._show_result_popup,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.controller.show_settings_window_signal.connect(
+            self.show_settings,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.controller.pipeline_state_signal.connect(
+            self._on_pipeline_state_changed,
+            Qt.ConnectionType.QueuedConnection,
+        )
         self.controller.settings_updated.connect(self._on_settings_updated)
 
     def _load_tray_icon(self) -> QIcon:
@@ -2162,9 +2207,9 @@ class TrayApp:
         self.tray.show()
         self.tray.setVisible(True)
         QTimer.singleShot(200, self._verify_tray_visible)
+        self._start_show_settings_signal_monitor()
         self.dictionary_shortcut_listener.start()
         QTimer.singleShot(1500, self._enable_tray_click)
-        self._start_external_show_signal_watcher()
         locale = self.controller.settings.ui_locale
         self._show_status(_tr(locale, "Talky started. Hold hotkey to record.", "started"))
 
@@ -2180,19 +2225,41 @@ class TrayApp:
     def _enable_tray_click(self) -> None:
         self._ready_for_tray_click = True
 
-    def _start_external_show_signal_watcher(self) -> None:
-        self._signal_timer = QTimer()
-        self._signal_timer.timeout.connect(self._check_external_show_signal)
-        self._signal_timer.start(2000)
+    def _show_settings_signal_path(self) -> Path:
+        return Path.home() / ".talky" / "show_settings.signal"
 
-    def _check_external_show_signal(self) -> None:
-        signal_path = Path.home() / ".talky" / "show_settings.signal"
-        if signal_path.exists():
-            try:
-                signal_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            self.show_settings()
+    def _start_show_settings_signal_monitor(self) -> None:
+        if hasattr(self, "_signal_timer"):
+            return
+        signal_path = self._show_settings_signal_path()
+        signal_path.parent.mkdir(parents=True, exist_ok=True)
+        # Ignore stale signal from previous app lifecycle.
+        try:
+            signal_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        timer = QTimer()
+        timer.setInterval(400)
+        timer.timeout.connect(self._consume_show_settings_signal)
+        timer.start()
+        self._signal_timer = timer
+
+    def _consume_show_settings_signal(self) -> None:
+        signal_path = self._show_settings_signal_path()
+        if not signal_path.exists():
+            return
+        try:
+            mtime_ns = signal_path.stat().st_mtime_ns
+        except Exception:
+            mtime_ns = 0
+        if mtime_ns and mtime_ns == self._last_consumed_show_settings_signal_mtime_ns:
+            return
+        self._last_consumed_show_settings_signal_mtime_ns = mtime_ns
+        try:
+            signal_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        self.show_settings()
 
     def show_settings(self) -> None:
         self.settings_window.show()
@@ -2203,6 +2270,7 @@ class TrayApp:
         self.dictionary_shortcut_listener.stop()
         if hasattr(self, "_signal_timer"):
             self._signal_timer.stop()
+        self.live_status_widget.hide()
         self.controller.stop()
         self.tray.hide()
         QApplication.quit()
@@ -2214,7 +2282,8 @@ class TrayApp:
             QSystemTrayIcon.ActivationReason.Trigger,
             QSystemTrayIcon.ActivationReason.DoubleClick,
         ):
-            self.show_settings()
+            # Keep tray click passive: dashboard opens only via "Tray menu -> Dashboard".
+            return
 
     def _show_status(self, message: str) -> None:
         self.tray.showMessage("Talky", message, QSystemTrayIcon.MessageIcon.Information, 1200)
@@ -2304,6 +2373,7 @@ class TrayApp:
         self.dictionary_shortcut_listener.stop()
         if hasattr(self, "_signal_timer"):
             self._signal_timer.stop()
+        self.live_status_widget.hide()
         self.controller.stop()
         self.tray.hide()
         if _restart_current_process("model_configured"):
@@ -2323,6 +2393,35 @@ class TrayApp:
             _tr(locale, "Error Message", "show_last_error")
         )
         self.quit_action.setText(_tr(locale, "Quit", "quit"))
+
+    def _on_pipeline_state_changed(self, state: str) -> None:
+        locale = self.controller.settings.ui_locale
+        append_debug_log(
+            "pipeline_state_recv: "
+            f"state={state}; before_visible={self.live_status_widget.isVisible()}; locale={locale}"
+        )
+        if state == "recording":
+            self.live_status_widget.show_recording(locale)
+            append_debug_log(
+                "pipeline_state_render: "
+                f"state=recording; after_visible={self.live_status_widget.isVisible()}; "
+                f"geom={self.live_status_widget.geometry().getRect()}"
+            )
+            return
+        if state == "processing":
+            self.live_status_widget.show_processing(locale)
+            append_debug_log(
+                "pipeline_state_render: "
+                f"state=processing; after_visible={self.live_status_widget.isVisible()}; "
+                f"geom={self.live_status_widget.geometry().getRect()}"
+            )
+            return
+        self.live_status_widget.hide_status()
+        append_debug_log(
+            "pipeline_state_render: "
+            f"state=idle; after_visible={self.live_status_widget.isVisible()}; "
+            f"geom={self.live_status_widget.geometry().getRect()}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2427,6 +2526,173 @@ class ResultPopupWindow(QWidget):
         slide.setEasingCurve(QEasingCurve.Type.OutCubic)
         slide.start()
         self._slide_animation = slide
+
+
+class LiveStatusWidget(QWidget):
+    _MIN_VISIBLE_SECONDS = 0.40
+    _STATE_DEBOUNCE_SECONDS = 0.12
+    _ANIMATION_INTERVAL_MS = 260
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.ToolTip
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.resize(288, 98)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        card = QFrame()
+        card.setObjectName("PopupCard")
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(14, 10, 14, 10)
+        card_layout.setSpacing(12)
+        self.logo = QLabel("")
+        self.logo.setFixedSize(48, 48)
+        self.logo.setScaledContents(False)
+        logo = _load_pixmap(_asset_path("talky-logo.png"), 48)
+        if logo and not logo.isNull():
+            self.logo.setPixmap(logo)
+        text_col = QVBoxLayout()
+        text_col.setSpacing(6)
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.addStretch(1)
+        self.title = QLabel("")
+        self.title.setObjectName("CardTitle")
+        self.title.setContentsMargins(0, 0, 0, 0)
+        self.subtitle = QLabel("")
+        self.subtitle.setObjectName("WindowSubtitle")
+        self.subtitle.setContentsMargins(0, 0, 0, 0)
+        text_col.addWidget(self.title)
+        text_col.addWidget(self.subtitle)
+        text_col.addStretch(1)
+        card_layout.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignVCenter)
+        card_layout.addLayout(text_col, 1)
+        root.addWidget(card)
+        self.setStyleSheet(NATIVE_STYLESHEET)
+        self._current_state = "idle"
+        self._visible_since_ts = 0.0
+        self._last_state_change_ts = 0.0
+        self._pending_state: tuple[str, str, str, str] | None = None
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self._force_hide)
+        self._state_timer = QTimer(self)
+        self._state_timer.setSingleShot(True)
+        self._state_timer.timeout.connect(self._apply_pending_state)
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(self._ANIMATION_INTERVAL_MS)
+        self._animation_timer.timeout.connect(self._on_animation_tick)
+        self._animation_prefix = ""
+        self._animation_tick_index = 0
+        self.hide()
+
+    def show_recording(self, locale: str) -> None:
+        anim_prefix = "收听中" if locale == "zh" else "Listening"
+        self._set_state(
+            "recording",
+            _tr(locale, "Recording", "live_recording_title"),
+            _tr(locale, "Listening...", "live_recording_subtitle"),
+            anim_prefix,
+        )
+
+    def show_processing(self, locale: str) -> None:
+        anim_prefix = "转译中" if locale == "zh" else "Transcribing"
+        self._set_state(
+            "processing",
+            _tr(locale, "Recognizing", "live_processing_title"),
+            _tr(locale, "Transcribing...", "live_processing_subtitle"),
+            anim_prefix,
+        )
+
+    def hide_status(self) -> None:
+        self._pending_state = None
+        self._state_timer.stop()
+        self._animation_timer.stop()
+        if not self.isVisible():
+            self._current_state = "idle"
+            return
+        elapsed = time.monotonic() - self._visible_since_ts
+        wait_s = self._MIN_VISIBLE_SECONDS - elapsed
+        if wait_s > 0:
+            self._hide_timer.start(max(1, int(wait_s * 1000)))
+            return
+        self._force_hide()
+
+    def _set_state(self, state: str, title: str, subtitle: str, animation_prefix: str = "") -> None:
+        now = time.monotonic()
+        if self._current_state == state and self.isVisible():
+            return
+        self._hide_timer.stop()
+        elapsed = now - self._last_state_change_ts
+        if self.isVisible() and elapsed < self._STATE_DEBOUNCE_SECONDS:
+            self._pending_state = (state, title, subtitle, animation_prefix)
+            remain_ms = max(1, int((self._STATE_DEBOUNCE_SECONDS - elapsed) * 1000))
+            self._state_timer.start(remain_ms)
+            return
+        self._apply_state(state, title, subtitle, animation_prefix)
+
+    def _apply_pending_state(self) -> None:
+        pending = self._pending_state
+        self._pending_state = None
+        if pending is None:
+            return
+        state, title, subtitle, animation_prefix = pending
+        self._apply_state(state, title, subtitle, animation_prefix)
+
+    def _apply_state(self, state: str, title: str, subtitle: str, animation_prefix: str) -> None:
+        self.title.setText(title)
+        self.subtitle.setText(subtitle)
+        self._start_state_animation(state, animation_prefix)
+        self._move_to_top_center()
+        if not self.isVisible():
+            self.show()
+        now = time.monotonic()
+        self._current_state = state
+        self._last_state_change_ts = now
+        self._visible_since_ts = now
+
+    def _force_hide(self) -> None:
+        self._animation_timer.stop()
+        self._animation_prefix = ""
+        self._animation_tick_index = 0
+        self.hide()
+        self._current_state = "idle"
+        self._pending_state = None
+
+    def _start_state_animation(self, state: str, animation_prefix: str) -> None:
+        if state not in {"recording", "processing"}:
+            self._animation_timer.stop()
+            self._animation_prefix = ""
+            return
+        self._animation_prefix = animation_prefix
+        self._animation_tick_index = 0
+        self._render_animation_subtitle()
+        self._animation_timer.start()
+
+    def _on_animation_tick(self) -> None:
+        self._animation_tick_index = (self._animation_tick_index + 1) % 4
+        self._render_animation_subtitle()
+
+    def _render_animation_subtitle(self) -> None:
+        dots = "." * self._animation_tick_index
+        self.subtitle.setText(f"{self._animation_prefix}{dots}")
+
+    def _move_to_top_center(self) -> None:
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        if screen is None:
+            return
+        rect = screen.availableGeometry()
+        x = rect.x() + (rect.width() - self.width()) // 2
+        y = rect.y() + 30
+        self.move(x, y)
 
 
 # ---------------------------------------------------------------------------

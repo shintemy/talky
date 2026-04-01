@@ -1,3 +1,32 @@
+from __future__ import annotations
+
+from talky.history_store import HistoryStore
+
+
+def test_history_store_migrates_legacy_markdown_files(tmp_path) -> None:
+    legacy = tmp_path / "legacy_history"
+    legacy.mkdir(parents=True, exist_ok=True)
+    (legacy / "2026-03-31.md").write_text("## 12:00:00\n\nhello\n\n", encoding="utf-8")
+    target = tmp_path / "new_history"
+    store = HistoryStore(target)
+
+    changed = store.migrate_from([legacy])
+    assert changed
+    assert (target / "2026-03-31.md").exists()
+
+
+def test_history_store_migration_keeps_existing_target_files(tmp_path) -> None:
+    legacy = tmp_path / "legacy_history"
+    legacy.mkdir(parents=True, exist_ok=True)
+    (legacy / "2026-03-31.md").write_text("legacy", encoding="utf-8")
+    target = tmp_path / "new_history"
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "2026-03-31.md").write_text("new", encoding="utf-8")
+    store = HistoryStore(target)
+
+    changed = store.migrate_from([legacy])
+    assert not changed
+    assert (target / "2026-03-31.md").read_text(encoding="utf-8") == "new"
 from datetime import datetime
 from pathlib import Path
 

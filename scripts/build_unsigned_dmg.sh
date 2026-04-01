@@ -11,6 +11,9 @@ BUILD_DIR="$PROJECT_DIR/build"
 DMG_DIR="$PROJECT_DIR/release"
 STAGE_DIR="$BUILD_DIR/dmg_stage"
 ICON_PATH="$PROJECT_DIR/assets/app.icns"
+INSTALLER_PNG_PATH="$PROJECT_DIR/assets/talky_installer.png"
+INSTALLER_ICNS_PATH="$PROJECT_DIR/assets/installer.icns"
+INSTALLER_ICON_FOR_DMG=""
 ENTITLEMENTS_PATH="$BUILD_DIR/entitlements.plist"
 
 VERSION="${1:-}"
@@ -247,9 +250,47 @@ hdiutil_udzo_srcfolder() {
   return 1
 }
 
+build_icns_from_png() {
+  local src_png="$1"
+  local out_icns="$2"
+  local iconset_dir="$BUILD_DIR/installer.iconset"
+  rm -rf "$iconset_dir" "$out_icns"
+  mkdir -p "$iconset_dir"
+
+  sips -z 16 16 "$src_png" --out "$iconset_dir/icon_16x16.png" >/dev/null
+  sips -z 32 32 "$src_png" --out "$iconset_dir/icon_16x16@2x.png" >/dev/null
+  sips -z 32 32 "$src_png" --out "$iconset_dir/icon_32x32.png" >/dev/null
+  sips -z 64 64 "$src_png" --out "$iconset_dir/icon_32x32@2x.png" >/dev/null
+  sips -z 128 128 "$src_png" --out "$iconset_dir/icon_128x128.png" >/dev/null
+  sips -z 256 256 "$src_png" --out "$iconset_dir/icon_128x128@2x.png" >/dev/null
+  sips -z 256 256 "$src_png" --out "$iconset_dir/icon_256x256.png" >/dev/null
+  sips -z 512 512 "$src_png" --out "$iconset_dir/icon_256x256@2x.png" >/dev/null
+  sips -z 512 512 "$src_png" --out "$iconset_dir/icon_512x512.png" >/dev/null
+  sips -z 1024 1024 "$src_png" --out "$iconset_dir/icon_512x512@2x.png" >/dev/null
+
+  iconutil -c icns "$iconset_dir" -o "$out_icns"
+}
+
+prepare_installer_icon() {
+  local generated_icns="$BUILD_DIR/installer_from_png.icns"
+  if [[ -f "$INSTALLER_PNG_PATH" ]] && command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+    echo "==> Preparing installer icon from assets/talky_installer.png..."
+    if build_icns_from_png "$INSTALLER_PNG_PATH" "$generated_icns"; then
+      INSTALLER_ICON_FOR_DMG="$generated_icns"
+      return
+    fi
+  fi
+  if [[ -f "$INSTALLER_ICNS_PATH" ]]; then
+    INSTALLER_ICON_FOR_DMG="$INSTALLER_ICNS_PATH"
+    return
+  fi
+  INSTALLER_ICON_FOR_DMG=""
+}
+
 echo "==> Creating DMG..."
 rm -f "$TMP_DMG_PATH" "$DMG_PATH"
 [[ -n "$HDIUTIL_WORK" ]] && rm -f "$DMG_TMP_OUT" "$FANCY_RW_DMG"
+prepare_installer_icon
 
 if [[ "${TALKY_DMG_FANCY:-}" == "1" ]]; then
   echo "==> Fancy DMG (RW image + Finder layout; may be slow)..."
@@ -305,8 +346,9 @@ APPLESCRIPT
     echo "==> No DMG background image; skipping layout customization."
   fi
 
-  INSTALLER_ICON="$PROJECT_DIR/assets/installer.icns"
-  if [[ -f "$INSTALLER_ICON" ]]; then
+  INSTALLER_ICON="$INSTALLER_ICON_FOR_DMG"
+
+  if [[ -n "$INSTALLER_ICON" ]] && [[ -f "$INSTALLER_ICON" ]]; then
     echo "==> Setting custom volume icon..."
     cp "$INSTALLER_ICON" "$MOUNT_POINT/.VolumeIcon.icns"
     SetFile -a C "$MOUNT_POINT"
@@ -331,6 +373,7 @@ elif [[ "${TALKY_DMG_SIMPLE:-}" != "1" ]] && [[ -f "$PROJECT_DIR/dmg_settings.py
   if dmgbuild -s "$PROJECT_DIR/dmg_settings.py" \
     -Dstage="${SRCFOLDER}" \
     -Dproject_dir="${PROJECT_DIR}" \
+    -Dinstaller_icon="${INSTALLER_ICON_FOR_DMG}" \
     "$FANCY_VOLNAME" \
     "$DMG_TMP_OUT"; then
     :
