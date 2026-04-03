@@ -79,11 +79,13 @@ class AudioRecorder:
         for sample_rate in unique_rates:
             for retry in range(3):
                 try:
-                    self._stream = self._open_input_stream(_callback, sample_rate=sample_rate)
-                    self._stream.start()
+                    stream = self._open_input_stream(_callback, sample_rate=sample_rate)
+                    stream.start()
+                    self._stream = stream
                     self._active_sample_rate = float(sample_rate)
                     return
                 except sd.PortAudioError as exc:
+                    self._safe_close_stream(locals().get("stream"))
                     last_exc = exc
                     if not self._is_recoverable_portaudio_error(exc):
                         raise
@@ -118,10 +120,24 @@ class AudioRecorder:
         message = str(exc).lower()
         return (
             "-10851" in message
+            or "-9986" in message
+            or "device unavailable" in message
             or "invalid property value" in message
             or "auhal" in message
             or "!obj" in message
         )
+
+    def _safe_close_stream(self, stream) -> None:
+        if stream is None:
+            return
+        try:
+            stream.stop()
+        except Exception:
+            pass
+        try:
+            stream.close()
+        except Exception:
+            pass
 
     def _reset_portaudio(self) -> None:
         terminate = getattr(sd, "_terminate", None)
@@ -141,9 +157,9 @@ class AudioRecorder:
         if self._stream is None:
             raise RuntimeError("Recorder is not running.")
 
-        self._stream.stop()
-        self._stream.close()
+        stream = self._stream
         self._stream = None
+        self._safe_close_stream(stream)
 
         if not self._chunks:
             raise RuntimeError("No audio captured.")

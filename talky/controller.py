@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import sounddevice as sd
-from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QObject, QThread, QTimer, Qt, pyqtSignal, pyqtSlot
 
 from talky.config_store import AppConfigStore
 from talky.debug_log import append_debug_log
@@ -85,6 +85,7 @@ class AppController(QObject):
     show_settings_window_signal = pyqtSignal()
     # Paste on main thread only (worker emits); macOS + pynput need this.
     paste_to_front_signal = pyqtSignal(str)
+    hotkey_action_signal = pyqtSignal(str)
 
     def __init__(self, config_store: AppConfigStore) -> None:
         super().__init__()
@@ -113,6 +114,10 @@ class AppController(QObject):
 
         self.paste_to_front_signal.connect(
             self._do_paste_to_front,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.hotkey_action_signal.connect(
+            self._handle_hotkey_action,
             Qt.ConnectionType.QueuedConnection,
         )
 
@@ -325,6 +330,25 @@ class AppController(QObject):
         )
 
     def _on_hotkey_pressed(self) -> None:
+        self._dispatch_hotkey_action("press")
+
+    def _on_hotkey_released(self) -> None:
+        self._dispatch_hotkey_action("release")
+
+    def _dispatch_hotkey_action(self, action: str) -> None:
+        if QThread.currentThread() is self.thread():
+            self._handle_hotkey_action(action)
+            return
+        self.hotkey_action_signal.emit(action)
+
+    @pyqtSlot(str)
+    def _handle_hotkey_action(self, action: str) -> None:
+        if action == "press":
+            self._handle_hotkey_pressed_main_thread()
+        elif action == "release":
+            self._handle_hotkey_released_main_thread()
+
+    def _handle_hotkey_pressed_main_thread(self) -> None:
         if time.monotonic() < self._hotkey_cooldown_until_ts:
             return
         if self._is_processing:
@@ -341,15 +365,11 @@ class AppController(QObject):
             self._emit_pipeline_state("recording", source="hotkey_pressed")
             self.status_signal.emit("Recording started...")
         except sd.PortAudioError as exc:
-            self.error_signal.emit(
-                "Cannot start microphone. Grant access at "
-                "System Settings > Privacy & Security > Microphone.\n"
-                f"Details: {exc}"
-            )
+            self.error_signal.emit(self._format_microphone_portaudio_error(exc))
         except Exception as exc:
             self.error_signal.emit(f"Failed to start recording: {exc}")
 
-    def _on_hotkey_released(self) -> None:
+    def _handle_hotkey_released_main_thread(self) -> None:
         if not self._is_recording:
             return
         try:
@@ -553,6 +573,21 @@ class AppController(QObject):
             f"hotkey={self.settings.hotkey}"
         )
         self.pipeline_state_signal.emit(state)
+
+    def _format_microphone_portaudio_error(self, exc: sd.PortAudioError) -> str:
+        message = str(exc)
+        lowered = message.lower()
+        if "-9986" in lowered or "device unavailable" in lowered:
+            return (
+                "Cannot start microphone: input device is unavailable or busy. "
+                "Check System Settings > Sound > Input, or close other apps using the mic, then retry.\n"
+                f"Details: {exc}"
+            )
+        return (
+            "Cannot start microphone. Grant access at "
+            "System Settings > Privacy & Security > Microphone.\n"
+            f"Details: {exc}"
+        )
 
     def _warm_up_models_async(self) -> None:
         if self.is_cloud_mode:

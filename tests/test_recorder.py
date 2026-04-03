@@ -11,17 +11,22 @@ import pytest
 
 
 class _FakeStream:
-    def __init__(self) -> None:
+    def __init__(self, *, start_error: Exception | None = None) -> None:
         self.started = False
+        self.stopped = False
+        self.closed = False
+        self._start_error = start_error
 
     def start(self) -> None:
+        if self._start_error is not None:
+            raise self._start_error
         self.started = True
 
     def stop(self) -> None:
-        return
+        self.stopped = True
 
     def close(self) -> None:
-        return
+        self.closed = True
 
 
 def _load_recorder_module(monkeypatch: pytest.MonkeyPatch):
@@ -141,6 +146,33 @@ def test_start_raises_nonrecoverable_portaudio_error(
         recorder.start()
 
     assert attempts["count"] == 1
+
+
+def test_start_cleans_failed_stream_and_recovers_on_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder_module = _load_recorder_module(monkeypatch)
+
+    fail_err = recorder_module.sd.PortAudioError("Internal PortAudio error [PaErrorCode -9986]")
+    failing_stream = _FakeStream(start_error=fail_err)
+    healthy_stream = _FakeStream()
+    streams = [failing_stream, healthy_stream]
+
+    def fake_input_stream(**kwargs):  # noqa: ANN003
+        del kwargs
+        if not streams:
+            raise RuntimeError("unexpected extra input stream attempt")
+        return streams.pop(0)
+
+    monkeypatch.setattr(recorder_module.sd, "InputStream", fake_input_stream)
+    monkeypatch.setattr(recorder_module.time, "sleep", lambda _: None)
+
+    recorder = recorder_module.AudioRecorder()
+    recorder.start()
+
+    assert failing_stream.closed is True
+    assert recorder.is_recording is True
+    assert healthy_stream.started is True
 
 
 def test_stop_records_last_duration_and_rms(monkeypatch: pytest.MonkeyPatch) -> None:

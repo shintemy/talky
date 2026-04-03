@@ -11,6 +11,7 @@ local_whisper_model/
 dev-log.md
 FEATURE_BACKLOG.md
 LOCAL_OPERATION_MANUAL.md
+LOCAL_PACKAGING_COMMANDS.md
 tests/pics.iconset/
 tests/pics_valid.iconset/
 history/
