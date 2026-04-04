@@ -228,7 +228,6 @@ def main() -> int:
         return check_result
 
     if not try_acquire_single_instance_lock():
-        notify_running_instance_show_settings()
         print("Talky is already running. Skip duplicate launch.", file=sys.stderr)
         return 0
 

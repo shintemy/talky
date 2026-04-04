@@ -38,3 +38,27 @@ def test_signal_file_opens_dashboard_and_is_consumed(tmp_path: Path) -> None:
 
     assert opened == ["opened"]
     assert not signal_file.exists()
+
+
+def test_controller_signal_suppressed_while_processing() -> None:
+    opened: list[str] = []
+    dummy = SimpleNamespace(
+        _pipeline_state="processing",
+        show_settings=lambda: opened.append("opened"),
+    )
+
+    TrayApp._show_settings_from_controller(dummy)
+
+    assert opened == []
+
+
+def test_controller_signal_opens_when_idle() -> None:
+    opened: list[str] = []
+    dummy = SimpleNamespace(
+        _pipeline_state="idle",
+        show_settings=lambda: opened.append("opened"),
+    )
+
+    TrayApp._show_settings_from_controller(dummy)
+
+    assert opened == ["opened"]

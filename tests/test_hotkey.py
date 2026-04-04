@@ -166,3 +166,77 @@ def test_hold_to_talk_fn_does_not_fire_when_initially_pressed(monkeypatch: pytes
     # Release after startup should clear state.
     callback(None, quartz_mod.kCGEventFlagsChanged, 0, None)
     assert releases == ["r"]
+
+
+def test_hold_to_talk_ensure_active_reenables_tap_when_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hotkey_mod, quartz_state = _reload_hotkey(monkeypatch)
+    listener = hotkey_mod.HoldToTalkHotkey(
+        key_mode="fn",
+        custom_keys=[],
+        on_press=lambda: None,
+        on_release=lambda: None,
+    )
+    listener.start()
+
+    before = len(quartz_state["enable_calls"])
+    assert listener.is_healthy() is True
+    assert listener.ensure_active() is True
+    after = len(quartz_state["enable_calls"])
+    assert after == before + 1
+    assert quartz_state["enable_calls"][-1] == (quartz_state["tap"], True)
+
+
+def test_hold_to_talk_ensure_active_returns_false_when_unhealthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hotkey_mod, _ = _reload_hotkey(monkeypatch)
+    listener = hotkey_mod.HoldToTalkHotkey(
+        key_mode="fn",
+        custom_keys=[],
+        on_press=lambda: None,
+        on_release=lambda: None,
+    )
+    assert listener.is_healthy() is False
+    assert listener.ensure_active() is False
+
+
+def test_global_shortcut_does_not_phantom_trigger_when_initially_held(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hotkey_mod, quartz_state = _reload_hotkey(monkeypatch)
+    quartz_mod = sys.modules["Quartz"]
+    quartz_mod.CGEventSourceFlagsState = (
+        lambda _state: quartz_mod.kCGEventFlagMaskAlternate
+        | quartz_mod.kCGEventFlagMaskCommand
+        | quartz_mod.kCGEventFlagMaskControl
+    )
+    triggered: list[str] = []
+    listener = hotkey_mod.GlobalShortcutListener(on_trigger=lambda: triggered.append("x"))
+    listener.start()
+
+    callback = quartz_state["callback"]
+    assert callback is not None
+    # Same held state right after startup should not retrigger.
+    callback(
+        None,
+        quartz_mod.kCGEventFlagsChanged,
+        quartz_mod.kCGEventFlagMaskAlternate
+        | quartz_mod.kCGEventFlagMaskCommand
+        | quartz_mod.kCGEventFlagMaskControl,
+        None,
+    )
+    assert triggered == []
+
+    # Release then press combo should trigger once.
+    callback(None, quartz_mod.kCGEventFlagsChanged, 0, None)
+    callback(
+        None,
+        quartz_mod.kCGEventFlagsChanged,
+        quartz_mod.kCGEventFlagMaskAlternate
+        | quartz_mod.kCGEventFlagMaskCommand
+        | quartz_mod.kCGEventFlagMaskControl,
+        None,
+    )
+    assert triggered == ["x"]

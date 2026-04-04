@@ -128,6 +128,30 @@ class HoldToTalkHotkey:
         self._quartz_thread = None
         self._pressed = False
 
+    def is_healthy(self) -> bool:
+        """Best-effort health check for quartz listener lifecycle."""
+        thread = self._quartz_thread
+        if thread is None:
+            return False
+        is_alive = getattr(thread, "is_alive", None)
+        if not callable(is_alive) or not is_alive():
+            return False
+        if self._tap is None or self._run_loop is None:
+            return False
+        return True
+
+    def ensure_active(self) -> bool:
+        """Try to keep event tap enabled; return False when listener is unhealthy."""
+        if not self.is_healthy():
+            return False
+        try:
+            import Quartz
+
+            Quartz.CGEventTapEnable(self._tap, True)
+            return True
+        except Exception:
+            return False
+
     def _start_modifier_quartz_listener(self, required: set[str]) -> None:
         try:
             import Quartz
@@ -328,6 +352,16 @@ class GlobalShortcutListener:
         ctrl_mask = getattr(Quartz, "kCGEventFlagMaskControl", 0)
         tap_disabled_timeout = getattr(Quartz, "kCGEventTapDisabledByTimeout", None)
         tap_disabled_user_input = getattr(Quartz, "kCGEventTapDisabledByUserInput", None)
+
+        # Seed held-state from current global flags to avoid startup phantom trigger.
+        try:
+            source_state = getattr(Quartz, "kCGEventSourceStateCombinedSessionState", 0)
+            current_flags = Quartz.CGEventSourceFlagsState(source_state)
+        except Exception:
+            current_flags = 0
+        self._triggered_while_held = bool(
+            (current_flags & alt_mask) and (current_flags & cmd_mask) and (current_flags & ctrl_mask)
+        )
 
         def _run_event_tap() -> None:
             tap_ref = {"tap": None}

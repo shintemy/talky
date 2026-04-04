@@ -134,3 +134,23 @@ def test_install_signal_handlers_starts_qt_signal_pump_timer(monkeypatch) -> Non
     assert main_module._SIGNAL_PUMP_TIMER is timer
     assert app.props["talky_signal_pump_timer"] is timer
     assert len(app.aboutToQuit.connected) == 1
+
+
+def test_duplicate_launch_does_not_notify_show_settings(monkeypatch) -> None:
+    fake_qtwidgets = SimpleNamespace(QApplication=type("FakeQApplication", (), {}))
+    fake_pyqt6 = SimpleNamespace(QtWidgets=fake_qtwidgets)
+    monkeypatch.setitem(sys.modules, "PyQt6", fake_pyqt6)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", fake_qtwidgets)
+    sys.modules.pop("main", None)
+    main_module = importlib.import_module("main")
+
+    called = {"notify": 0}
+    monkeypatch.setattr(main_module, "try_acquire_single_instance_lock", lambda: False)
+    monkeypatch.setattr(
+        main_module,
+        "notify_running_instance_show_settings",
+        lambda: called.__setitem__("notify", called["notify"] + 1),
+    )
+
+    assert main_module.main() == 0
+    assert called["notify"] == 0

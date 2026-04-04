@@ -2096,6 +2096,8 @@ class SettingsWindow(QWidget):
     def _auto_save_configs(self) -> None:
         try:
             prompt = self._prompt_tab.collect_prompt()
+            # Persist prompt first to avoid losing edits when config validation blocks.
+            self.controller.update_custom_llm_prompt(prompt)
             self._configs_tab._save_settings(quiet=True, custom_llm_prompt=prompt)  # noqa: SLF001
         except Exception:
             pass
@@ -2126,6 +2128,7 @@ class TrayApp:
         self.result_popup = ResultPopupWindow()
         self.live_status_widget = LiveStatusWidget()
         self._last_error_message = ""
+        self._pipeline_state = "idle"
         self.dictionary_shortcut_listener = GlobalShortcutListener(
             on_trigger=self.controller.request_show_settings
         )
@@ -2168,7 +2171,7 @@ class TrayApp:
             Qt.ConnectionType.QueuedConnection,
         )
         self.controller.show_settings_window_signal.connect(
-            self.show_settings,
+            self._show_settings_from_controller,
             Qt.ConnectionType.QueuedConnection,
         )
         self.controller.pipeline_state_signal.connect(
@@ -2265,6 +2268,16 @@ class TrayApp:
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+
+    def _show_settings_from_controller(self) -> None:
+        # Keep hold-to-talk uninterrupted: ignore auto-open while recording/processing.
+        if self._pipeline_state in {"recording", "processing"}:
+            append_debug_log(
+                "show_settings suppressed: source=controller_signal; "
+                f"pipeline_state={self._pipeline_state}"
+            )
+            return
+        self.show_settings()
 
     def quit_app(self) -> None:
         self.dictionary_shortcut_listener.stop()
@@ -2395,6 +2408,7 @@ class TrayApp:
         self.quit_action.setText(_tr(locale, "Quit", "quit"))
 
     def _on_pipeline_state_changed(self, state: str) -> None:
+        self._pipeline_state = state
         locale = self.controller.settings.ui_locale
         append_debug_log(
             "pipeline_state_recv: "

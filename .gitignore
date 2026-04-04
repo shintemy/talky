@@ -9,9 +9,14 @@ local_whisper_model/
 
 .cursor_updates.md
 dev-log.md
+DEVLOG.md
+LOGIC_INDEX.md
+logic.md
+docs/logic/
 FEATURE_BACKLOG.md
 LOCAL_OPERATION_MANUAL.md
 LOCAL_PACKAGING_COMMANDS.md
+SWIFT_MIGRATION_BLUEPRINT.md
 tests/pics.iconset/
 tests/pics_valid.iconset/
 history/

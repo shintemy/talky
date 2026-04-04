@@ -16,15 +16,19 @@ def test_build_llm_prompt_includes_required_rules() -> None:
 
     prompt = build_llm_system_prompt(dictionary)
 
-    assert "Remove fillers and obvious ASR noise" in prompt
-    assert "Rewrite only" in prompt
-    assert "Keep the source language" in prompt
-    assert "Do not translate" in prompt
-    assert "Short question input -> output exactly one question sentence" in prompt
-    assert "You are not a QA assistant" in prompt
-    assert "Dictionary is correction-only" in prompt
-    assert "clear section headers/lists" in prompt
-    assert "grammar form consistent" in prompt
-    assert "Output only the cleaned result" in prompt
+    assert "You are a Dictation Transcription Editor" in prompt
+    assert "STRICT LANGUAGE MATCH" in prompt
+    assert "NEVER translate" in prompt
+    assert "Mixed-language input" in prompt
+    assert "STRICT PERSPECTIVE" in prompt
+    assert "NO ADDITIONS" in prompt
+    assert "Remove speech fillers, stutters, and obvious ASR noise" in prompt
+    assert "Never insert Dictionary terms unless conceptually implied by the source" in prompt
+    assert "Short Question: Output exactly one cleanly formatted question sentence" in prompt
+    assert "<TYPOGRAPHY_RULES>" in prompt
+    assert "PANGU SPACING (Crucial)" in prompt
+    assert "NUMBER SPACING" in prompt
+    assert "Strictly use full-width punctuation (，。！？) in Chinese context" in prompt
+    assert "<DICTIONARY>" in prompt
     assert "TensorRT" in prompt
     assert "Alice Huang" in prompt

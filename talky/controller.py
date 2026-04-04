@@ -192,6 +192,15 @@ class AppController(QObject):
         self.settings = settings
         self.settings_updated.emit(settings)
 
+    def update_custom_llm_prompt(self, prompt: str) -> None:
+        """Persist prompt text without rebuilding recorder/LLM services."""
+        normalized = (prompt or "").strip()
+        if self.settings.custom_llm_prompt == normalized:
+            return
+        self.settings.custom_llm_prompt = normalized
+        self.config_store.save(self.settings)
+        self.settings_updated.emit(self.settings)
+
     def _build_cloud_service(self) -> CloudProcessService | None:
         if (
             self.settings.mode == "cloud"
@@ -277,15 +286,21 @@ class AppController(QObject):
         elapsed = now - self._last_wake_guard_tick_ts
         self._last_wake_guard_tick_ts = now
         threshold = self._wake_guard_threshold()
-        if not should_rebuild_hotkey(elapsed, threshold):
+        rebuild_due_to_gap = should_rebuild_hotkey(elapsed, threshold)
+        hotkey_healthy = bool(self.hotkey and self.hotkey.ensure_active())
+        if not rebuild_due_to_gap and hotkey_healthy:
             return
         if self._is_recording or self._is_processing:
             return
         # System sleep/wake often invalidates global key taps; proactively rebuild.
         self._start_hotkey()
         self._record_wake_guard_rebuild(now)
+        if rebuild_due_to_gap:
+            reason = "System wake detected."
+        else:
+            reason = "Hotkey listener health check failed."
         self.status_signal.emit(
-            "System wake detected. Hotkey listener refreshed. "
+            f"{reason} Hotkey listener refreshed. "
             f"Wake-guard telemetry: {self.settings.wake_guard_suspected_false_positive_count}/"
             f"{self.settings.wake_guard_rebuild_count} suspected false-positive."
         )
