@@ -5,10 +5,9 @@ import os
 
 def should_warm_up_asr() -> bool:
     """
-    ASR warm-up is opt-in.
+    ASR warm-up runs by default so the first transcription is fast.
 
-    Some macOS + Metal driver combinations are unstable during background warm-up.
-    Keep startup stable by default and allow manual enabling via env flag.
+    Set TALKY_ASR_WARMUP=0 to disable if Metal driver issues occur at startup.
     """
-    value = os.environ.get("TALKY_ASR_WARMUP", "0").strip().lower()
-    return value in {"1", "true", "yes", "on"}
+    value = os.environ.get("TALKY_ASR_WARMUP", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}

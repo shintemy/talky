@@ -18,7 +18,7 @@ from talky.dictionary_entries import (
     extract_terms,
     parse_dictionary_entries,
 )
-from talky.focus import get_frontmost_app, has_focus_target
+from talky.focus import FrontAppInfo, activate_app_by_pid, get_frontmost_app, has_focus_target
 from talky.hotkey import HoldToTalkHotkey
 from talky.history_store import HistoryStore
 from talky.llm_service import OllamaTextCleaner
@@ -33,6 +33,7 @@ from talky.processing_guard import (
 )
 from talky.recorder import AudioRecorder
 from talky.remote_service import CloudProcessService
+from talky.semantic_edit import looks_like_edit_instruction
 from talky.task_timeout import run_with_timeout
 from talky.text_guard import (
     collapse_duplicate_output,
@@ -58,6 +59,15 @@ _PROCESSING_WATCHDOG_INTERVAL_MS = 1000
 _PROCESSING_TIMEOUT_S = 45.0
 _ASR_STEP_TIMEOUT_S = 35.0
 _LLM_STEP_TIMEOUT_S = 25.0
+_TRANSIENT_FRONT_APPS = {
+    "finder",
+    "dock",
+    "loginwindow",
+    "textinputmenuagent",
+    "systemuiserver",
+    "controlcenter",
+    "notificationcenter",
+}
 
 
 def normalize_to_simplified_chinese(text: str) -> str:
@@ -136,6 +146,8 @@ class AppController(QObject):
         self._processing_timeout_s = _PROCESSING_TIMEOUT_S
         self._processing_generation = 0
         self._processing_wav_path: Path | None = None
+        self._last_target_front_app: FrontAppInfo | None = None
+        self._last_focus_target_pid: int | None = None
 
     def _get_asr(self) -> MlxWhisperASR:
         if self.is_cloud_mode:
@@ -192,14 +204,15 @@ class AppController(QObject):
         self.settings = settings
         self.settings_updated.emit(settings)
 
-    def update_custom_llm_prompt(self, prompt: str) -> None:
+    def update_custom_llm_prompt(self, prompt: str, *, emit_settings_updated: bool = True) -> None:
         """Persist prompt text without rebuilding recorder/LLM services."""
         normalized = (prompt or "").strip()
         if self.settings.custom_llm_prompt == normalized:
             return
         self.settings.custom_llm_prompt = normalized
         self.config_store.save(self.settings)
-        self.settings_updated.emit(self.settings)
+        if emit_settings_updated:
+            self.settings_updated.emit(self.settings)
 
     def _build_cloud_service(self) -> CloudProcessService | None:
         if (
@@ -236,6 +249,61 @@ class AppController(QObject):
         if not host:
             host = "http://127.0.0.1:11434"
         os.environ["OLLAMA_HOST"] = host
+
+    def _is_talky_front_app(self, front_app: FrontAppInfo | None) -> bool:
+        if front_app is None:
+            return False
+        name = front_app.name.strip().lower()
+        if "talky" in name:
+            return True
+        if front_app.pid == os.getpid():
+            return True
+        return False
+
+    def _is_transient_front_app(self, front_app: FrontAppInfo | None) -> bool:
+        if front_app is None:
+            return True
+        name = front_app.name.strip().lower()
+        return name in _TRANSIENT_FRONT_APPS
+
+    def _remember_target_front_app(self, front_app: FrontAppInfo | None) -> None:
+        if front_app is None:
+            return
+        if front_app.pid <= 0:
+            return
+        if self._is_talky_front_app(front_app):
+            return
+        name = front_app.name.strip().lower()
+        if name in {"finder", "dock", "loginwindow"}:
+            return
+        self._last_target_front_app = front_app
+
+    def _should_paste_to_focus_target(self, current_front_app: FrontAppInfo | None) -> bool:
+        self._remember_target_front_app(current_front_app)
+        if has_focus_target(current_front_app):
+            return True
+        if (
+            self._last_focus_target_pid is not None
+            and current_front_app is not None
+            and current_front_app.pid == self._last_focus_target_pid
+        ):
+            # AX focus detection can briefly report false negatives on some apps.
+            return True
+        candidate = self._last_target_front_app
+        if candidate is None:
+            return False
+        if not (
+            self._is_talky_front_app(current_front_app)
+            or self._is_transient_front_app(current_front_app)
+        ):
+            return False
+        if not activate_app_by_pid(candidate.pid):
+            return False
+        # Allow AX focus attributes to catch up after app activation.
+        time.sleep(0.06)
+        restored = get_frontmost_app()
+        self._remember_target_front_app(restored)
+        return has_focus_target(restored)
 
     def _is_local_ollama_host(self, host: str) -> bool:
         value = (host or "").strip()
@@ -374,6 +442,12 @@ class AppController(QObject):
         if not self.is_cloud_mode and not self._get_asr().is_model_available():
             self.error_signal.emit("__MODEL_NOT_FOUND__")
             return
+        front_app = get_frontmost_app()
+        self._remember_target_front_app(front_app)
+        if front_app is not None and has_focus_target(front_app):
+            self._last_focus_target_pid = front_app.pid
+        else:
+            self._last_focus_target_pid = None
         try:
             self.recorder.start()
             self._is_recording = True
@@ -426,9 +500,14 @@ class AppController(QObject):
             self._processing_wav_path = wav_path
             self._processing_generation += 1
             generation = self._processing_generation
+            selected_text_snapshot = ""
+            front_app = get_frontmost_app()
+            self._remember_target_front_app(front_app)
+            if has_focus_target(front_app):
+                selected_text_snapshot = self.paster.capture_selected_text()
             worker = threading.Thread(
                 target=self._process_pipeline,
-                args=(wav_path, generation, asr_timeout_s),
+                args=(wav_path, generation, asr_timeout_s, selected_text_snapshot),
                 daemon=True,
             )
             worker.start()
@@ -471,7 +550,13 @@ class AppController(QObject):
         final_text = normalize_to_simplified_chinese(final_text)
         return final_text
 
-    def _process_local(self, wav_path: Path, *, asr_timeout_s: float) -> str:
+    def _process_local(
+        self,
+        wav_path: Path,
+        *,
+        asr_timeout_s: float,
+        selected_text_snapshot: str = "",
+    ) -> str:
         ok, error = check_ollama_reachable()
         if not ok:
             host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -508,6 +593,23 @@ class AppController(QObject):
             self.status_signal.emit("ASR text too short. LLM step skipped.")
             return ""
 
+        if selected_text_snapshot and looks_like_edit_instruction(corrected_raw_text):
+            self.status_signal.emit("Detected edit instruction on selected text.")
+            rewritten_text = run_with_timeout(
+                lambda: self.llm.rewrite_selected_text(
+                    selected_text=selected_text_snapshot,
+                    instruction=corrected_raw_text,
+                    dictionary_terms=dict_terms,
+                ),
+                _LLM_STEP_TIMEOUT_S,
+                label="LLM selection-rewrite step",
+            )
+            rewritten_text = apply_phonetic_dictionary(rewritten_text, dict_terms)
+            rewritten_text = normalize_person_pronouns(rewritten_text, person_terms)
+            rewritten_text = collapse_duplicate_output(rewritten_text)
+            rewritten_text = normalize_to_simplified_chinese(rewritten_text)
+            return rewritten_text
+
         llm_start = time.perf_counter()
         final_text = run_with_timeout(
             lambda: self.llm.clean(
@@ -528,14 +630,24 @@ class AppController(QObject):
         final_text = normalize_to_simplified_chinese(final_text)
         return final_text
 
-    def _process_pipeline(self, wav_path: Path, generation: int, asr_timeout_s: float) -> None:
+    def _process_pipeline(
+        self,
+        wav_path: Path,
+        generation: int,
+        asr_timeout_s: float,
+        selected_text_snapshot: str = "",
+    ) -> None:
         try:
             if generation != self._processing_generation:
                 return
             if self.is_cloud_mode:
                 final_text = self._process_cloud(wav_path)
             else:
-                final_text = self._process_local(wav_path, asr_timeout_s=asr_timeout_s)
+                final_text = self._process_local(
+                    wav_path,
+                    asr_timeout_s=asr_timeout_s,
+                    selected_text_snapshot=selected_text_snapshot,
+                )
             if generation != self._processing_generation:
                 return
             if not final_text:
@@ -553,7 +665,7 @@ class AppController(QObject):
             print(f"[Talky] History appended: {history_path}")
 
             current_front_app = get_frontmost_app()
-            if has_focus_target(current_front_app):
+            if self._should_paste_to_focus_target(current_front_app):
                 self.paste_to_front_signal.emit(final_text)
                 self.status_signal.emit("Pasted to current focus target.")
             else:

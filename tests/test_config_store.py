@@ -1,6 +1,8 @@
+import json
 from pathlib import Path
 
 from talky.config_store import AppConfigStore
+from talky.prompting import LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_NO_TYPOGRAPHY
 
 
 def test_load_defaults_when_file_missing(tmp_path: Path) -> None:
@@ -33,3 +35,48 @@ def test_save_and_reload_custom_dictionary(tmp_path: Path) -> None:
     assert reloaded.hotkey == "right_option"
     assert reloaded.llm_debug_stream is True
     assert reloaded.ollama_host == "http://192.168.1.50:11434"
+
+
+def test_load_migrates_legacy_builtin_prompt_snapshot(tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "hotkey": "fn",
+                "custom_llm_prompt": LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_NO_TYPOGRAPHY,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    store = AppConfigStore(config_path)
+
+    loaded = store.load()
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.custom_llm_prompt == ""
+    assert saved.get("custom_llm_prompt", None) == ""
+
+
+def test_load_keeps_real_custom_prompt_untouched(tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.json"
+    custom_prompt = "Team custom prompt"
+    config_path.write_text(
+        json.dumps(
+            {
+                "hotkey": "fn",
+                "custom_llm_prompt": custom_prompt,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    store = AppConfigStore(config_path)
+
+    loaded = store.load()
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.custom_llm_prompt == custom_prompt
+    assert saved.get("custom_llm_prompt", None) == custom_prompt

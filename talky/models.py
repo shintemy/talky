@@ -6,6 +6,8 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from talky.prompting import should_follow_latest_default_prompt
+
 
 RECOMMENDED_OLLAMA_MODEL = "qwen3.5:9b"
 
@@ -62,6 +64,9 @@ class AppSettings:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
+        custom_prompt = str(data.get("custom_llm_prompt", "")).strip()
+        if should_follow_latest_default_prompt(custom_prompt):
+            custom_prompt = ""
         return cls(
             custom_dictionary=list(data.get("custom_dictionary", [])),
             hotkey=str(data.get("hotkey", "fn")),
@@ -84,7 +89,7 @@ class AppSettings:
             mode=str(data.get("mode", "local")),
             cloud_api_url=str(data.get("cloud_api_url", "")),
             cloud_api_key=str(data.get("cloud_api_key", "")),
-            custom_llm_prompt=str(data.get("custom_llm_prompt", "")),
+            custom_llm_prompt=custom_prompt,
             wake_guard_gap_threshold_s=float(data.get("wake_guard_gap_threshold_s", 20.0)),
             wake_guard_rebuild_count=int(data.get("wake_guard_rebuild_count", 0)),
             wake_guard_suspected_false_positive_count=int(

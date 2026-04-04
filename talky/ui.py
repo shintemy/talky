@@ -1234,6 +1234,8 @@ class DictionaryTab(QWidget):
 # ---------------------------------------------------------------------------
 
 class PromptTab(QWidget):
+    prompt_changed = pyqtSignal(str)
+
     def __init__(self, controller: AppController, locale: str = "en", parent=None):
         super().__init__(parent)
         self.controller = controller
@@ -1279,6 +1281,11 @@ class PromptTab(QWidget):
             "QPlainTextEdit:focus { border: 2px solid rgba(237, 74, 32, 0.55); padding: 7px; }"
         )
         sec_layout.addWidget(self._editor)
+        self._prompt_sync_timer = QTimer(self)
+        self._prompt_sync_timer.setSingleShot(True)
+        self._prompt_sync_timer.setInterval(300)
+        self._prompt_sync_timer.timeout.connect(self._emit_prompt_changed)
+        self._editor.textChanged.connect(self._on_editor_text_changed)
 
         hint_row = QHBoxLayout()
         hint_row.setSpacing(0)
@@ -1328,6 +1335,12 @@ class PromptTab(QWidget):
 
     def _restore_default(self) -> None:
         self._editor.setPlainText(self._default_template)
+
+    def _on_editor_text_changed(self) -> None:
+        self._prompt_sync_timer.start()
+
+    def _emit_prompt_changed(self) -> None:
+        self.prompt_changed.emit(self.collect_prompt())
 
     def _apply_locale_texts(self) -> None:
         self._title_label.setText(
@@ -2052,6 +2065,7 @@ class SettingsWindow(QWidget):
         self._stack.addWidget(self._configs_tab)
 
         self._tab_group.idClicked.connect(self._on_tab_changed)
+        self._prompt_tab.prompt_changed.connect(self._persist_prompt_draft)
 
         # ---- Layout (native — no wrapper container) ----
         root = QVBoxLayout(self)
@@ -2072,6 +2086,9 @@ class SettingsWindow(QWidget):
         self.load_from_settings(self.controller.settings)
 
     def _on_tab_changed(self, tab_id: int) -> None:
+        previous_tab_id = self._stack.currentIndex()
+        if previous_tab_id == 3 and tab_id != 3:
+            self._persist_prompt_draft(self._prompt_tab.collect_prompt())
         self._stack.setCurrentIndex(tab_id)
         if tab_id == 1:
             self._history_tab.refresh()
@@ -2097,10 +2114,13 @@ class SettingsWindow(QWidget):
         try:
             prompt = self._prompt_tab.collect_prompt()
             # Persist prompt first to avoid losing edits when config validation blocks.
-            self.controller.update_custom_llm_prompt(prompt)
+            self._persist_prompt_draft(prompt)
             self._configs_tab._save_settings(quiet=True, custom_llm_prompt=prompt)  # noqa: SLF001
         except Exception:
             pass
+
+    def _persist_prompt_draft(self, prompt: str) -> None:
+        self.controller.update_custom_llm_prompt(prompt, emit_settings_updated=False)
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)

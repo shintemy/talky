@@ -6,7 +6,7 @@ import urllib.request
 
 import ollama
 
-from talky.prompting import build_llm_system_prompt
+from talky.prompting import build_llm_system_prompt, build_selection_rewrite_prompt
 
 
 class OllamaTextCleaner:
@@ -62,6 +62,47 @@ class OllamaTextCleaner:
         # Never surface model thinking as final content.
         # If content stream is empty, preserve the source transcript instead.
         return raw_text.strip()
+
+    def rewrite_selected_text(
+        self,
+        *,
+        selected_text: str,
+        instruction: str,
+        dictionary_terms: list[str],
+    ) -> str:
+        system_prompt = build_selection_rewrite_prompt(dictionary_terms)
+        stream = self._chat_with_fallback(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": (
+                        "<selected_text>\n"
+                        f"{selected_text}\n"
+                        "</selected_text>\n\n"
+                        "<instruction>\n"
+                        f"{instruction}\n"
+                        "</instruction>"
+                    ),
+                },
+            ],
+            think=False,
+            stream=True,
+            options={
+                "temperature": 0,
+                "num_predict": 400,
+                "top_p": 0.1,
+            },
+        )
+        parts: list[str] = []
+        for chunk in stream:
+            piece = chunk.get("message", {}).get("content", "") or ""
+            if piece:
+                parts.append(piece)
+        final = "".join(parts).strip()
+        if final:
+            return final
+        return selected_text.strip()
 
     def _chat_with_fallback(self, messages, think: bool, stream: bool, options: dict):
         try:

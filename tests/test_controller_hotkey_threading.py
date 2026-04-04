@@ -14,6 +14,7 @@ from PyQt6.QtCore import QThread
 from PyQt6.QtWidgets import QApplication
 
 from talky.controller import AppController
+from talky.focus import FrontAppInfo
 from talky.models import AppSettings
 
 _app = QApplication.instance() or QApplication([])
@@ -140,3 +141,37 @@ def test_update_custom_llm_prompt_persists_without_service_rebuild() -> None:
     assert controller.settings.custom_llm_prompt == "custom prompt"
     assert rebuild_calls == []
     assert updated_settings and updated_settings[-1].custom_llm_prompt == "custom prompt"
+
+
+def test_should_paste_after_refocus_from_talky(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = _build_controller()
+    controller._last_target_front_app = FrontAppInfo(name="Safari", pid=321)
+
+    monkeypatch.setattr("talky.controller.activate_app_by_pid", lambda pid: pid == 321)
+    monkeypatch.setattr(
+        "talky.controller.get_frontmost_app",
+        lambda: FrontAppInfo(name="Safari", pid=321),
+    )
+    monkeypatch.setattr("talky.controller.has_focus_target", lambda app: app.name == "Safari")
+    monkeypatch.setattr("talky.controller.time.sleep", lambda _s: None)
+
+    assert controller._should_paste_to_focus_target(FrontAppInfo(name="Talky", pid=111))
+
+
+def test_should_paste_after_refocus_from_transient_front_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller._last_target_front_app = FrontAppInfo(name="Safari", pid=321)
+
+    monkeypatch.setattr("talky.controller.activate_app_by_pid", lambda pid: pid == 321)
+    monkeypatch.setattr(
+        "talky.controller.get_frontmost_app",
+        lambda: FrontAppInfo(name="Safari", pid=321),
+    )
+    monkeypatch.setattr("talky.controller.has_focus_target", lambda app: app.pid == 321)
+    monkeypatch.setattr("talky.controller.time.sleep", lambda _s: None)
+
+    assert controller._should_paste_to_focus_target(
+        FrontAppInfo(name="TextInputMenuAgent", pid=777)
+    )

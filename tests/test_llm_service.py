@@ -130,3 +130,43 @@ def test_clean_falls_back_to_http_when_sdk_chat_fails(monkeypatch: pytest.Monkey
     result = cleaner.clean(raw_text="原始文本", dictionary_terms=[])
 
     assert result == "fallback result"
+
+
+def test_rewrite_selected_text_uses_selected_text_and_instruction() -> None:
+    captured = {}
+
+    def chat_impl(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        return [{"message": {"content": "我周五去找你", "thinking": ""}}]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+
+    result = cleaner.rewrite_selected_text(
+        selected_text="我周四去找你",
+        instruction="周四改成周五",
+        dictionary_terms=[],
+    )
+
+    assert result == "我周五去找你"
+    assert captured["stream"] is True
+    assert captured["messages"][1]["content"].count("<selected_text>") == 1
+    assert "我周四去找你" in captured["messages"][1]["content"]
+    assert "周四改成周五" in captured["messages"][1]["content"]
+
+
+def test_rewrite_selected_text_falls_back_to_selected_text_when_empty_output() -> None:
+    def chat_impl(**kwargs):  # noqa: ANN003
+        del kwargs
+        return [{"message": {"content": "", "thinking": "internal only"}}]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+
+    result = cleaner.rewrite_selected_text(
+        selected_text="我周四去找你",
+        instruction="周四改成周五",
+        dictionary_terms=[],
+    )
+
+    assert result == "我周四去找你"
