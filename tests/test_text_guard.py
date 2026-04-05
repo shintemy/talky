@@ -67,6 +67,24 @@ def test_enforce_source_boundaries_preserves_question_intent() -> None:
     assert corrected == source
 
 
+def test_enforce_source_boundaries_blocks_non_question_becoming_question() -> None:
+    source = "你帮我来理解一下这个问题"
+    output = "请问你希望我帮你理解哪个问题？"
+
+    corrected = enforce_source_boundaries(source, output)
+
+    assert corrected == source
+
+
+def test_enforce_source_boundaries_blocks_statement_to_followup_question() -> None:
+    source = "帮我整理一下这个文件"
+    output = "你需要我怎么帮你整理这个文件呢？"
+
+    corrected = enforce_source_boundaries(source, output)
+
+    assert corrected == source
+
+
 def test_enforce_source_boundaries_blocks_question_to_markdown_outline() -> None:
     source = "如何检测每次开启服务时它是否有去检查版本更新？"
     output = (

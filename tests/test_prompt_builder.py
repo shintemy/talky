@@ -26,6 +26,8 @@ def test_build_llm_prompt_includes_required_rules() -> None:
     assert "Mixed-language input" in prompt
     assert "STRICT PERSPECTIVE" in prompt
     assert "NO ADDITIONS" in prompt
+    assert "PRESERVE SENTENCE TYPE" in prompt
+    assert "NEVER generate a conversational" in prompt
     assert "NOISE REDUCTION" in prompt
     assert "HIGH INFORMATION DENSITY" in prompt
     assert "STRUCTURAL REORGANIZATION" in prompt

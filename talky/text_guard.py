@@ -98,10 +98,14 @@ def enforce_source_boundaries(source_text: str, output_text: str) -> str:
     source_l = source.lower()
     output_l = output.lower()
 
-    # Preserve question intent: source question should remain a question.
     source_is_question = _looks_like_question(source)
     output_is_question = _looks_like_question(output)
+    # Preserve question intent: source question should remain a question.
     if source_is_question and not output_is_question:
+        return source
+    # Prevent LLM from fabricating a question when source is not one
+    # (typical sign of responding to input instead of cleaning it).
+    if not source_is_question and output_is_question:
         return source
 
     introduced = any((m in output_l) and (m not in source_l) for m in advisory_markers)
