@@ -134,6 +134,58 @@ LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_NO_TYPOGRAPHY = (
     "</DICTIONARY>"
 )
 
+VIBE_CODING_PROMPT_BLOCK = (
+    "\n\n<VIBE_CODING_MODE_ACTIVE>\n"
+    "# OVERRIDE: VIBE CODING PROTOCOL\n"
+    "The user has enabled \"Vibe Coding\" mode. You MUST apply the following "
+    "high-priority overrides to all previous instructions:\n\n"
+    "1. FORCED ENGLISH OUTPUT: Regardless of the input language (Chinese, Mixed, etc.), "
+    "you MUST output ONLY in English. Ignore the \"Strict Language Match\" rule.\n"
+    "2. EXTREME CONCISENESS: Apply the \"Less is More\" principle. Strip away all "
+    "linguistic filler. Use technical, professional, and punchy English "
+    "(e.g., Senior Engineer/Product Architect style).\n"
+    "3. NO SEMANTIC LOSS: While minimizing word count, you MUST NOT omit or alter any "
+    "technical details, logic, or the original intent of the speaker.\n"
+    "4. VIBE-CENTRIC EDITING: \n"
+    "   - Convert fuzzy descriptions into precise technical terms "
+    "(e.g., \"那个转圈的东西\" -> \"Loading Spinner\").\n"
+    "   - Use action-oriented verbs (e.g., \"Refactor\", \"Implement\", \"Optimize\", "
+    "\"Streamline\").\n"
+    "   - Prefer noun-heavy, high-density phrases over full grammatical sentences "
+    "if it enhances readability.\n\n"
+    "<FORMATTING_ADJUSTMENT>\n"
+    "- Output the result as a clean, distilled list or a singular powerful paragraph.\n"
+    "- Maintain Pangu spacing (half-width space) between any numbers and English words.\n"
+    "</FORMATTING_ADJUSTMENT>\n"
+    "</VIBE_CODING_MODE_ACTIVE>"
+)
+
+_VIBE_CODING_START_TAG = "<VIBE_CODING_MODE_ACTIVE>"
+_VIBE_CODING_END_TAG = "</VIBE_CODING_MODE_ACTIVE>"
+
+
+def inject_vibe_coding_block(prompt: str) -> str:
+    """Append the Vibe Coding block if not already present."""
+    if _VIBE_CODING_START_TAG in prompt:
+        return prompt
+    return prompt.rstrip() + VIBE_CODING_PROMPT_BLOCK
+
+
+def strip_vibe_coding_block(prompt: str) -> str:
+    """Remove the Vibe Coding block from prompt text."""
+    start = prompt.find(_VIBE_CODING_START_TAG)
+    if start < 0:
+        return prompt
+    end = prompt.find(_VIBE_CODING_END_TAG, start)
+    if end < 0:
+        return prompt[:start].rstrip()
+    return (prompt[:start] + prompt[end + len(_VIBE_CODING_END_TAG) :]).strip()
+
+
+def has_vibe_coding_block(prompt: str) -> bool:
+    return _VIBE_CODING_START_TAG in prompt
+
+
 _KNOWN_BUILTIN_PROMPT_TEMPLATES = {
     DEFAULT_LLM_PROMPT_TEMPLATE.strip(),
     LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_V044.strip(),

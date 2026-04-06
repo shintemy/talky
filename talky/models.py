@@ -58,6 +58,7 @@ class AppSettings:
     cloud_api_url: str = ""
     cloud_api_key: str = ""
     custom_llm_prompt: str = ""
+    usage_mode: str = "daily"  # "daily" | "vibecoding"
     wake_guard_gap_threshold_s: float = 20.0
     wake_guard_rebuild_count: int = 0
     wake_guard_suspected_false_positive_count: int = 0
@@ -90,6 +91,7 @@ class AppSettings:
             cloud_api_url=str(data.get("cloud_api_url", "")),
             cloud_api_key=str(data.get("cloud_api_key", "")),
             custom_llm_prompt=custom_prompt,
+            usage_mode=str(data.get("usage_mode", "daily")),
             wake_guard_gap_threshold_s=float(data.get("wake_guard_gap_threshold_s", 20.0)),
             wake_guard_rebuild_count=int(data.get("wake_guard_rebuild_count", 0)),
             wake_guard_suspected_false_positive_count=int(

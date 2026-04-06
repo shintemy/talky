@@ -156,6 +156,9 @@ _ZH = {
     "processing_mode": "处理模式",
     "cloud_api_url": "Cloud API URL",
     "cloud_api_key": "Cloud API Key",
+    "usage_mode": "使用模式",
+    "usage_mode_daily": "Daily",
+    "usage_mode_vibecoding": "Vibecoding",
     # Prompt tab
     "prompt": "Prompt",
     "prompt_section_title": "LLM System Prompt",
@@ -1333,6 +1336,12 @@ class PromptTab(QWidget):
             return ""
         return text
 
+    def set_prompt_text(self, text: str) -> None:
+        """Replace editor content (used by SettingsWindow to inject/strip mode blocks)."""
+        current = self._editor.toPlainText()
+        if current != text:
+            self._editor.setPlainText(text)
+
     def _restore_default(self) -> None:
         self._editor.setPlainText(self._default_template)
 
@@ -1572,6 +1581,51 @@ class ConfigsTab(QWidget):
         content_layout.setContentsMargins(24, 12, 24, 16)
         content_layout.setSpacing(16)
 
+        # ---- Usage Mode section ----
+        usage_section = QFrame()
+        usage_section.setObjectName("SectionFrame")
+        us_layout = QVBoxLayout(usage_section)
+        us_layout.setContentsMargins(16, 14, 16, 14)
+        us_layout.setSpacing(10)
+        self._usage_mode_title = QLabel(
+            _tr(self._locale, "Usage Mode", "usage_mode")
+        )
+        self._usage_mode_title.setObjectName("CardTitle")
+        us_layout.addWidget(self._usage_mode_title)
+
+        self._usage_mode_group = QButtonGroup(self)
+        self._usage_mode_group.setExclusive(True)
+
+        usage_row = QHBoxLayout()
+        usage_row.setSpacing(10)
+
+        _USAGE_CHIP_BASE = (
+            "QPushButton { font-size: 13px; font-weight: 500; padding: 8px 20px;"
+            " border: 1.5px solid #D1D1D6; border-radius: 8px;"
+            " background: #F9F9F9; color: #6E6E73; }"
+            "QPushButton:hover { border-color: #AEAEB2; background: #F2F2F7; }"
+        )
+        _USAGE_CHIP_CHECKED = (
+            "QPushButton:checked { border: 2px solid #ED4A20; background: #FFF5F2;"
+            " color: #ED4A20; font-weight: 600; }"
+        )
+
+        for btn_id, (en_text, key) in enumerate(
+            [("Daily", "usage_mode_daily"), ("Vibecoding", "usage_mode_vibecoding")]
+        ):
+            btn = QPushButton(_tr(self._locale, en_text, key))
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(_USAGE_CHIP_BASE + _USAGE_CHIP_CHECKED)
+            self._usage_mode_group.addButton(btn, btn_id)
+            usage_row.addWidget(btn)
+        usage_row.addStretch()
+
+        self._usage_mode_group.button(0).setChecked(True)
+        us_layout.addLayout(usage_row)
+        content_layout.addWidget(usage_section)
+
+        # ---- Base Parameters section ----
         params_section = QFrame()
         params_section.setObjectName("SectionFrame")
         ps_layout = QVBoxLayout(params_section)
@@ -1628,6 +1682,11 @@ class ConfigsTab(QWidget):
         self._locale = settings.ui_locale
         self._apply_locale_texts()
 
+        usage_btn_id = 1 if settings.usage_mode == "vibecoding" else 0
+        usage_btn = self._usage_mode_group.button(usage_btn_id)
+        if usage_btn:
+            usage_btn.setChecked(True)
+
         mode_idx = self._mode_combo.findData(settings.mode)
         self._mode_combo.setCurrentIndex(0 if mode_idx < 0 else mode_idx)
         self._cloud_url_input.setText(settings.cloud_api_url)
@@ -1670,7 +1729,9 @@ class ConfigsTab(QWidget):
         checked_id = self._hotkey_button_group.checkedId()
         hotkey_mode = self._hotkey_mode_map.get(checked_id, "fn")
         lang_data = self.language_combo.currentData()
+        usage_mode = "vibecoding" if self._usage_mode_group.checkedId() == 1 else "daily"
         return {
+            "usage_mode": usage_mode,
             "mode": str(self._mode_combo.currentData()),
             "cloud_api_url": self._cloud_url_input.text().strip(),
             "cloud_api_key": self._cloud_key_input.text().strip(),
@@ -1689,6 +1750,15 @@ class ConfigsTab(QWidget):
         }
 
     def _apply_locale_texts(self) -> None:
+        self._usage_mode_title.setText(
+            _tr(self._locale, "Usage Mode", "usage_mode")
+        )
+        self._usage_mode_group.button(0).setText(
+            _tr(self._locale, "Daily", "usage_mode_daily")
+        )
+        self._usage_mode_group.button(1).setText(
+            _tr(self._locale, "Vibecoding", "usage_mode_vibecoding")
+        )
         self._params_card_title.setText(
             _tr(self._locale, "Base Parameters", "base_params")
         )
@@ -1963,6 +2033,7 @@ class ConfigsTab(QWidget):
             cloud_api_url=collected["cloud_api_url"],
             cloud_api_key=collected["cloud_api_key"],
             custom_llm_prompt=custom_llm_prompt,
+            usage_mode=collected.get("usage_mode", "daily"),
         )
         QTimer.singleShot(0, lambda s=settings, q=quiet: self._apply_settings_deferred(s, q))
 
@@ -2112,8 +2183,25 @@ class SettingsWindow(QWidget):
 
     def _auto_save_configs(self) -> None:
         try:
+            from talky.prompting import (
+                DEFAULT_LLM_PROMPT_TEMPLATE,
+                inject_vibe_coding_block,
+                strip_vibe_coding_block,
+            )
+
             prompt = self._prompt_tab.collect_prompt()
-            # Persist prompt first to avoid losing edits when config validation blocks.
+            collected = self._configs_tab.collect_settings()
+            usage_mode = collected.get("usage_mode", "daily")
+            if usage_mode == "vibecoding":
+                base = prompt or DEFAULT_LLM_PROMPT_TEMPLATE
+                prompt = inject_vibe_coding_block(base)
+            else:
+                prompt = strip_vibe_coding_block(prompt)
+                if prompt.strip() == DEFAULT_LLM_PROMPT_TEMPLATE.strip():
+                    prompt = ""
+            self._prompt_tab.set_prompt_text(
+                prompt or DEFAULT_LLM_PROMPT_TEMPLATE
+            )
             self._persist_prompt_draft(prompt)
             self._configs_tab._save_settings(quiet=True, custom_llm_prompt=prompt)  # noqa: SLF001
         except Exception:

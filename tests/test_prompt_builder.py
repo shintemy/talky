@@ -2,6 +2,10 @@ from talky.prompting import (
     build_asr_initial_prompt,
     build_llm_system_prompt,
     build_selection_rewrite_prompt,
+    inject_vibe_coding_block,
+    strip_vibe_coding_block,
+    has_vibe_coding_block,
+    VIBE_CODING_PROMPT_BLOCK,
 )
 
 
@@ -41,6 +45,41 @@ def test_build_llm_prompt_includes_required_rules() -> None:
     assert "[INSERT_USER_TEXT_HERE]" in prompt
     assert "TensorRT" in prompt
     assert "Alice Huang" in prompt
+
+
+def test_inject_vibe_coding_block_appends_when_absent() -> None:
+    base = "Some prompt text."
+
+    result = inject_vibe_coding_block(base)
+
+    assert has_vibe_coding_block(result)
+    assert result.startswith("Some prompt text.")
+    assert "VIBE CODING PROTOCOL" in result
+
+
+def test_inject_vibe_coding_block_is_idempotent() -> None:
+    base = "Some prompt text."
+    once = inject_vibe_coding_block(base)
+
+    twice = inject_vibe_coding_block(once)
+
+    assert once == twice
+
+
+def test_strip_vibe_coding_block_removes_block() -> None:
+    base = "Some prompt text."
+    with_block = inject_vibe_coding_block(base)
+
+    stripped = strip_vibe_coding_block(with_block)
+
+    assert not has_vibe_coding_block(stripped)
+    assert stripped == "Some prompt text."
+
+
+def test_strip_vibe_coding_block_noop_when_absent() -> None:
+    text = "No vibe block here."
+
+    assert strip_vibe_coding_block(text) == text
 
 
 def test_build_selection_rewrite_prompt_includes_constraints_and_dictionary() -> None:
