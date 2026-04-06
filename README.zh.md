@@ -2,8 +2,8 @@
 
 ![Talky Banner](assets/github-banner.png)
 
-macOS (Apple Silicon) 本地语音输入助手。  
-按住说话，松开即粘贴 — 全程本地 ASR + LLM 处理。
+**说到，做到。** 首款全本地运行的 Vibe Coding 语音引擎。  
+本地 Whisper + LLM — 按住说话，松开即粘贴。零云端，零妥协。
 
 **语言 / Language:** [English](README.md) | 中文
 
@@ -17,7 +17,7 @@ macOS (Apple Silicon) 本地语音输入助手。
 
 1. **按住** Fn 键开始录音
 2. **说话** — 自然表达即可
-3. **松开** — Talky 自动转写语音（Whisper）并用本地大模型（Ollama）整理文本
+3. **松开** — Talky 自动转写语音（Whisper）并用本地大模型（Ollama）精炼文本
 4. **文本自动粘贴** 到当前应用的输入框
 
 如果没有聚焦的输入框，会弹出悬浮复制面板，手动粘贴即可。
@@ -31,6 +31,12 @@ macOS (Apple Silicon) 本地语音输入助手。
 5. 设置向导会引导你安装 [Ollama](https://ollama.com/download)、AI 模型和语音模型
 
 ## 功能
+
+### Vibe Coding 模式
+
+在 Dashboard → Configs 中切换至 **Vibecoding**，即可将任意语言的口述转为简洁英文 prompt——直接粘贴到 Cursor、Claude 等 AI 编程工具。
+
+<img src="assets/vibecoding-mode.png" alt="Talky Dashboard 中的 Vibecoding 模式" width="520">
 
 - **100% 本地** — ASR + LLM 在本机运行，不上传任何数据
 - **按住说话** — 简单直觉的按住交互，无需唤醒词

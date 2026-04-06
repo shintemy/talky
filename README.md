@@ -2,8 +2,8 @@
 
 ![Talky Banner](assets/github-banner.png)
 
-A local-first voice input assistant for macOS (Apple Silicon).  
-Hold to talk, release to paste — powered by on-device ASR + LLM.
+**Speak it. Ship it.** The first fully-local voice engine for vibe coding.  
+On-device Whisper + LLM — hold to talk, release to paste. No cloud. No compromise.
 
 **Language:** English | [中文](README.zh.md)
 
@@ -17,7 +17,7 @@ Hold to talk, release to paste — powered by on-device ASR + LLM.
 
 1. **Hold** the Fn key to start recording
 2. **Speak** naturally
-3. **Release** — Talky transcribes your speech (Whisper) and cleans it with a local LLM (Ollama)
+3. **Release** — Talky transcribes your speech (Whisper) and refines it with a local LLM (Ollama)
 4. **Text is pasted** into the active app automatically
 
 If no input field is focused, a floating copy panel appears so you can manually paste.
@@ -31,6 +31,12 @@ If no input field is focused, a floating copy panel appears so you can manually 
 5. The setup wizard will guide you through installing [Ollama](https://ollama.com/download), an AI model, and a speech model
 
 ## Features
+
+### Vibe Coding Mode
+
+Switch to **Vibecoding** in Dashboard → Configs to turn spoken ideas in any language into concise English prompts — ready to paste into Cursor, Claude, or any AI coding agent.
+
+<img src="assets/vibecoding-mode.png" alt="Vibecoding mode in Talky Dashboard" width="520">
 
 - **100% Local** — ASR + LLM run on your Mac, nothing is uploaded
 - **Hold-to-Talk** — simple press-and-hold interaction, no wake words
