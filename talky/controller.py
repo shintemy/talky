@@ -616,18 +616,20 @@ class AppController(QObject):
                 raw_text=corrected_raw_text,
                 dictionary_terms=dict_terms,
                 custom_prompt_template=self.settings.custom_llm_prompt,
+                usage_mode=self.settings.usage_mode,
             ),
             _LLM_STEP_TIMEOUT_S,
             label="LLM step",
         )
         llm_elapsed = time.perf_counter() - llm_start
         print(f"[Talky] LLM elapsed: {llm_elapsed:.2f}s")
-        final_text = apply_phonetic_dictionary(final_text, dict_terms)
-        final_text = normalize_person_pronouns(final_text, person_terms)
-        final_text = enforce_pronoun_consistency(corrected_raw_text, final_text)
-        final_text = enforce_source_boundaries(corrected_raw_text, final_text)
+        if self.settings.usage_mode != "vibecoding":
+            final_text = apply_phonetic_dictionary(final_text, dict_terms)
+            final_text = normalize_person_pronouns(final_text, person_terms)
+            final_text = enforce_pronoun_consistency(corrected_raw_text, final_text)
+            final_text = enforce_source_boundaries(corrected_raw_text, final_text)
+            final_text = normalize_to_simplified_chinese(final_text)
         final_text = collapse_duplicate_output(final_text)
-        final_text = normalize_to_simplified_chinese(final_text)
         return final_text
 
     def _process_pipeline(

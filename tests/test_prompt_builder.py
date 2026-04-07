@@ -1,4 +1,6 @@
 from talky.prompting import (
+    DEFAULT_LLM_PROMPT_TEMPLATE,
+    VIBECODING_LLM_PROMPT_TEMPLATE,
     build_asr_initial_prompt,
     build_llm_system_prompt,
     build_selection_rewrite_prompt,
@@ -47,19 +49,119 @@ def test_build_llm_prompt_includes_required_rules() -> None:
     assert "Alice Huang" in prompt
 
 
-def test_inject_vibe_coding_block_appends_when_absent() -> None:
-    base = "Some prompt text."
+# ---------------------------------------------------------------------------
+# Dual-template: default prompt selection
+# ---------------------------------------------------------------------------
+
+
+def test_build_llm_prompt_daily_uses_default_template() -> None:
+    prompt = build_llm_system_prompt(["MLX"], usage_mode="daily")
+
+    assert "STRICT LANGUAGE MATCH" in prompt
+    assert "NEVER translate" in prompt
+    assert "FORCED ENGLISH OUTPUT" not in prompt
+    assert not has_vibe_coding_block(prompt)
+
+
+def test_build_llm_prompt_vibecoding_uses_dedicated_template() -> None:
+    prompt = build_llm_system_prompt(["MLX"], usage_mode="vibecoding")
+
+    assert "FORCED ENGLISH OUTPUT" in prompt
+    assert "EXTREME CONCISENESS" in prompt
+    assert "VIBE-CENTRIC EDITING" in prompt
+    assert "Dictation-to-English Editor" in prompt
+    assert "STRICT LANGUAGE MATCH" not in prompt
+    assert "NEVER translate" not in prompt
+    assert "MLX" in prompt
+
+
+def test_vibecoding_template_no_chinese_typography() -> None:
+    prompt = build_llm_system_prompt([], usage_mode="vibecoding")
+
+    assert "PANGU SPACING (Crucial)" not in prompt
+    assert "full-width punctuation" not in prompt
+    assert "standard English punctuation" in prompt
+
+
+def test_vibecoding_template_preserves_structural_constraints() -> None:
+    prompt = build_llm_system_prompt([], usage_mode="vibecoding")
+
+    assert "STRICT PERSPECTIVE" in prompt
+    assert "NO ADDITIONS" in prompt
+    assert "PRESERVE SENTENCE TYPE" in prompt
+    assert "Raw Transcript:" in prompt
+    assert "<DICTIONARY>" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Custom template + vibecoding: inject + neutralize fallback
+# ---------------------------------------------------------------------------
+
+
+def test_build_llm_prompt_custom_template_vibecoding_injects_block() -> None:
+    custom = DEFAULT_LLM_PROMPT_TEMPLATE.replace("{dictionary}", "custom")
+
+    prompt = build_llm_system_prompt(["X"], custom_template=custom, usage_mode="vibecoding")
+
+    assert has_vibe_coding_block(prompt)
+    assert "VIBE CODING PROTOCOL" in prompt
+
+
+def test_build_llm_prompt_custom_template_vibecoding_neutralizes_language() -> None:
+    custom = DEFAULT_LLM_PROMPT_TEMPLATE.replace("{dictionary}", "custom")
+
+    prompt = build_llm_system_prompt(["X"], custom_template=custom, usage_mode="vibecoding")
+
+    assert "STRICT LANGUAGE MATCH" not in prompt
+    assert "NEVER translate" not in prompt
+    assert "ENGLISH OUTPUT" in prompt
+
+
+def test_build_llm_prompt_custom_template_daily_unchanged() -> None:
+    custom = "My team's custom prompt with {dictionary} slot."
+
+    prompt = build_llm_system_prompt(["Foo"], custom_template=custom, usage_mode="daily")
+
+    assert prompt == "My team's custom prompt with Foo slot."
+    assert not has_vibe_coding_block(prompt)
+
+
+def test_build_llm_prompt_custom_template_without_language_block_still_injects() -> None:
+    """Custom prompt that lacks STRICT LANGUAGE MATCH — inject still works."""
+    custom = "Custom editor. <CRITICAL_CONSTRAINTS>\n1. Be concise.\n</CRITICAL_CONSTRAINTS>"
+
+    prompt = build_llm_system_prompt(["Y"], custom_template=custom, usage_mode="vibecoding")
+
+    assert has_vibe_coding_block(prompt)
+    assert "VIBE CODING PROTOCOL" in prompt
+
+
+# ---------------------------------------------------------------------------
+# inject / strip (still used for custom prompts)
+# ---------------------------------------------------------------------------
+
+
+def test_inject_vibe_coding_block_inserts_before_critical_constraints() -> None:
+    result = inject_vibe_coding_block(DEFAULT_LLM_PROMPT_TEMPLATE)
+
+    assert has_vibe_coding_block(result)
+    assert "VIBE CODING PROTOCOL" in result
+    vibe_pos = result.find("<VIBE_CODING_MODE_ACTIVE>")
+    crit_pos = result.find("<CRITICAL_CONSTRAINTS>")
+    assert vibe_pos < crit_pos, "Vibe block must appear BEFORE <CRITICAL_CONSTRAINTS>"
+
+
+def test_inject_vibe_coding_block_prepends_for_custom_prompt() -> None:
+    base = "Custom prompt without constraints."
 
     result = inject_vibe_coding_block(base)
 
     assert has_vibe_coding_block(result)
-    assert result.startswith("Some prompt text.")
-    assert "VIBE CODING PROTOCOL" in result
+    assert result.endswith("Custom prompt without constraints.")
 
 
 def test_inject_vibe_coding_block_is_idempotent() -> None:
-    base = "Some prompt text."
-    once = inject_vibe_coding_block(base)
+    once = inject_vibe_coding_block(DEFAULT_LLM_PROMPT_TEMPLATE)
 
     twice = inject_vibe_coding_block(once)
 
@@ -67,19 +169,47 @@ def test_inject_vibe_coding_block_is_idempotent() -> None:
 
 
 def test_strip_vibe_coding_block_removes_block() -> None:
-    base = "Some prompt text."
-    with_block = inject_vibe_coding_block(base)
+    with_block = inject_vibe_coding_block(DEFAULT_LLM_PROMPT_TEMPLATE)
 
     stripped = strip_vibe_coding_block(with_block)
 
     assert not has_vibe_coding_block(stripped)
-    assert stripped == "Some prompt text."
+    assert stripped.strip() == DEFAULT_LLM_PROMPT_TEMPLATE.strip()
 
 
 def test_strip_vibe_coding_block_noop_when_absent() -> None:
     text = "No vibe block here."
 
     assert strip_vibe_coding_block(text) == text
+
+
+# ---------------------------------------------------------------------------
+# Migration: embedded vibe block in stored custom prompt
+# ---------------------------------------------------------------------------
+
+
+def test_build_llm_prompt_strips_embedded_vibe_block_from_stored_prompt() -> None:
+    stored = inject_vibe_coding_block(DEFAULT_LLM_PROMPT_TEMPLATE)
+
+    prompt = build_llm_system_prompt(["MLX"], custom_template=stored, usage_mode="daily")
+
+    assert not has_vibe_coding_block(prompt)
+
+
+def test_build_llm_prompt_strips_then_reinjects_for_vibecoding_custom() -> None:
+    """If a stored custom prompt already has an embedded vibe block, strip it
+    first, then apply the clean inject + neutralize pipeline."""
+    stored = inject_vibe_coding_block(DEFAULT_LLM_PROMPT_TEMPLATE)
+
+    prompt = build_llm_system_prompt(["MLX"], custom_template=stored, usage_mode="vibecoding")
+
+    assert has_vibe_coding_block(prompt)
+    assert "STRICT LANGUAGE MATCH" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Selection rewrite (unaffected by usage_mode)
+# ---------------------------------------------------------------------------
 
 
 def test_build_selection_rewrite_prompt_includes_constraints_and_dictionary() -> None:

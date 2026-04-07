@@ -25,8 +25,18 @@ class OllamaTextCleaner:
             options={"temperature": 0.0, "num_predict": 8, "top_p": 0.1},
         )
 
-    def clean(self, raw_text: str, dictionary_terms: list[str], custom_prompt_template: str = "") -> str:
-        system_prompt = build_llm_system_prompt(dictionary_terms, custom_template=custom_prompt_template)
+    def clean(
+        self,
+        raw_text: str,
+        dictionary_terms: list[str],
+        custom_prompt_template: str = "",
+        usage_mode: str = "daily",
+    ) -> str:
+        system_prompt = build_llm_system_prompt(
+            dictionary_terms,
+            custom_template=custom_prompt_template,
+            usage_mode=usage_mode,
+        )
         stream = self._chat_with_fallback(
             messages=[
                 {"role": "system", "content": system_prompt},

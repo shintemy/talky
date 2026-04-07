@@ -1325,7 +1325,12 @@ class PromptTab(QWidget):
 
     def load_from_settings(self, settings: AppSettings) -> None:
         self._locale = settings.ui_locale
-        template = settings.custom_llm_prompt or self._default_template
+        from talky.prompting import strip_vibe_coding_block
+
+        raw = settings.custom_llm_prompt or self._default_template
+        template = strip_vibe_coding_block(raw)
+        if not template.strip():
+            template = self._default_template
         if self._editor.toPlainText() != template:
             self._editor.setPlainText(template)
         self._apply_locale_texts()
@@ -2183,25 +2188,7 @@ class SettingsWindow(QWidget):
 
     def _auto_save_configs(self) -> None:
         try:
-            from talky.prompting import (
-                DEFAULT_LLM_PROMPT_TEMPLATE,
-                inject_vibe_coding_block,
-                strip_vibe_coding_block,
-            )
-
             prompt = self._prompt_tab.collect_prompt()
-            collected = self._configs_tab.collect_settings()
-            usage_mode = collected.get("usage_mode", "daily")
-            if usage_mode == "vibecoding":
-                base = prompt or DEFAULT_LLM_PROMPT_TEMPLATE
-                prompt = inject_vibe_coding_block(base)
-            else:
-                prompt = strip_vibe_coding_block(prompt)
-                if prompt.strip() == DEFAULT_LLM_PROMPT_TEMPLATE.strip():
-                    prompt = ""
-            self._prompt_tab.set_prompt_text(
-                prompt or DEFAULT_LLM_PROMPT_TEMPLATE
-            )
             self._persist_prompt_draft(prompt)
             self._configs_tab._save_settings(quiet=True, custom_llm_prompt=prompt)  # noqa: SLF001
         except Exception:
