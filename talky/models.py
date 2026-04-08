@@ -58,6 +58,7 @@ class AppSettings:
     cloud_api_url: str = ""
     cloud_api_key: str = ""
     custom_llm_prompt: str = ""
+    custom_vibe_prompt: str = ""
     usage_mode: str = "daily"  # "daily" | "vibecoding"
     wake_guard_gap_threshold_s: float = 20.0
     wake_guard_rebuild_count: int = 0
@@ -68,6 +69,9 @@ class AppSettings:
         custom_prompt = str(data.get("custom_llm_prompt", "")).strip()
         if should_follow_latest_default_prompt(custom_prompt):
             custom_prompt = ""
+        custom_vibe = str(data.get("custom_vibe_prompt", "")).strip()
+        if should_follow_latest_default_prompt(custom_vibe):
+            custom_vibe = ""
         return cls(
             custom_dictionary=list(data.get("custom_dictionary", [])),
             hotkey=str(data.get("hotkey", "fn")),
@@ -91,6 +95,7 @@ class AppSettings:
             cloud_api_url=str(data.get("cloud_api_url", "")),
             cloud_api_key=str(data.get("cloud_api_key", "")),
             custom_llm_prompt=custom_prompt,
+            custom_vibe_prompt=custom_vibe,
             usage_mode=str(data.get("usage_mode", "daily")),
             wake_guard_gap_threshold_s=float(data.get("wake_guard_gap_threshold_s", 20.0)),
             wake_guard_rebuild_count=int(data.get("wake_guard_rebuild_count", 0)),

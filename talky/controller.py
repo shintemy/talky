@@ -214,6 +214,16 @@ class AppController(QObject):
         if emit_settings_updated:
             self.settings_updated.emit(self.settings)
 
+    def update_custom_vibe_prompt(self, prompt: str, *, emit_settings_updated: bool = True) -> None:
+        """Persist vibecoding prompt text without rebuilding recorder/LLM services."""
+        normalized = (prompt or "").strip()
+        if self.settings.custom_vibe_prompt == normalized:
+            return
+        self.settings.custom_vibe_prompt = normalized
+        self.config_store.save(self.settings)
+        if emit_settings_updated:
+            self.settings_updated.emit(self.settings)
+
     def _build_cloud_service(self) -> CloudProcessService | None:
         if (
             self.settings.mode == "cloud"
@@ -617,6 +627,7 @@ class AppController(QObject):
                 dictionary_terms=dict_terms,
                 custom_prompt_template=self.settings.custom_llm_prompt,
                 usage_mode=self.settings.usage_mode,
+                custom_vibe_template=self.settings.custom_vibe_prompt,
             ),
             _LLM_STEP_TIMEOUT_S,
             label="LLM step",

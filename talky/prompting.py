@@ -165,6 +165,9 @@ VIBECODING_LLM_PROMPT_TEMPLATE = (
     "(e.g., \"那个转圈的东西\" → \"Loading Spinner\").\n"
     "  - Use action-oriented verbs (\"Refactor\", \"Implement\", \"Optimize\", "
     "\"Streamline\").\n"
+    "  - IMPERATIVE PREFERENCE: When the input implies a coding task or instruction, "
+    "use the imperative mood (e.g., \"Implement the login flow\" rather than "
+    "\"We should implement the login flow\").\n"
     "  - Prefer noun-heavy, high-density phrases over full sentences when it enhances "
     "readability.\n"
     "- Fix likely homophone/term errors based ONLY on context or the provided "
@@ -181,6 +184,10 @@ VIBECODING_LLM_PROMPT_TEMPLATE = (
     "- Use standard English punctuation (periods, commas, semicolons).\n"
     "- Maintain spacing between numbers and words "
     "(e.g., \"3 endpoints\" not \"3endpoints\").\n"
+    "- CODE ENTITIES: Strictly preserve all spoken variable names, APIs, file "
+    "extensions, or coding formats (camelCase, PascalCase, etc.). Always wrap inline "
+    "code, variables, and technical entities in single Markdown backticks "
+    "(e.g., `fetchUserData`).\n"
     "</TYPOGRAPHY_RULES>\n\n"
     "<DICTIONARY>\n"
     "[{dictionary}]\n"
@@ -312,20 +319,15 @@ def build_llm_system_prompt(
     dictionary_terms: list[str],
     custom_template: str = "",
     usage_mode: str = "daily",
+    custom_vibe_template: str = "",
 ) -> str:
     dictionary_text = _format_dictionary(dictionary_terms)
-    custom = custom_template.strip()
-    if custom:
-        template = strip_vibe_coding_block(custom)
-        if usage_mode == "vibecoding":
-            template = _neutralize_language_constraint(template)
-            template = inject_vibe_coding_block(template)
+    if usage_mode == "vibecoding":
+        raw = custom_vibe_template.strip()
+        template = raw if raw else VIBECODING_LLM_PROMPT_TEMPLATE
     else:
-        template = (
-            VIBECODING_LLM_PROMPT_TEMPLATE
-            if usage_mode == "vibecoding"
-            else DEFAULT_LLM_PROMPT_TEMPLATE
-        )
+        raw = custom_template.strip()
+        template = strip_vibe_coding_block(raw) if raw else DEFAULT_LLM_PROMPT_TEMPLATE
     if "{dictionary}" in template:
         prompt = template.replace("{dictionary}", dictionary_text)
     else:

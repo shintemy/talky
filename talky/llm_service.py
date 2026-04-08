@@ -31,11 +31,13 @@ class OllamaTextCleaner:
         dictionary_terms: list[str],
         custom_prompt_template: str = "",
         usage_mode: str = "daily",
+        custom_vibe_template: str = "",
     ) -> str:
         system_prompt = build_llm_system_prompt(
             dictionary_terms,
             custom_template=custom_prompt_template,
             usage_mode=usage_mode,
+            custom_vibe_template=custom_vibe_template,
         )
         stream = self._chat_with_fallback(
             messages=[

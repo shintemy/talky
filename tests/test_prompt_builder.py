@@ -98,23 +98,28 @@ def test_vibecoding_template_preserves_structural_constraints() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_llm_prompt_custom_template_vibecoding_injects_block() -> None:
-    custom = DEFAULT_LLM_PROMPT_TEMPLATE.replace("{dictionary}", "custom")
+def test_build_llm_prompt_custom_vibe_template_used_when_provided() -> None:
+    custom_vibe = "Custom vibe prompt with {dictionary} and FORCED ENGLISH."
 
-    prompt = build_llm_system_prompt(["X"], custom_template=custom, usage_mode="vibecoding")
+    prompt = build_llm_system_prompt(
+        ["X"], usage_mode="vibecoding", custom_vibe_template=custom_vibe
+    )
 
-    assert has_vibe_coding_block(prompt)
-    assert "VIBE CODING PROTOCOL" in prompt
+    assert "Custom vibe prompt" in prompt
+    assert "FORCED ENGLISH" in prompt
+    assert "X" in prompt
 
 
-def test_build_llm_prompt_custom_template_vibecoding_neutralizes_language() -> None:
-    custom = DEFAULT_LLM_PROMPT_TEMPLATE.replace("{dictionary}", "custom")
+def test_build_llm_prompt_vibecoding_ignores_daily_custom_template() -> None:
+    """When vibecoding + no custom_vibe_template, daily custom_template is ignored."""
+    daily_custom = "My daily custom prompt."
 
-    prompt = build_llm_system_prompt(["X"], custom_template=custom, usage_mode="vibecoding")
+    prompt = build_llm_system_prompt(
+        ["X"], custom_template=daily_custom, usage_mode="vibecoding"
+    )
 
-    assert "STRICT LANGUAGE MATCH" not in prompt
-    assert "NEVER translate" not in prompt
-    assert "ENGLISH OUTPUT" in prompt
+    assert "My daily custom prompt" not in prompt
+    assert "FORCED ENGLISH OUTPUT" in prompt
 
 
 def test_build_llm_prompt_custom_template_daily_unchanged() -> None:
@@ -126,14 +131,16 @@ def test_build_llm_prompt_custom_template_daily_unchanged() -> None:
     assert not has_vibe_coding_block(prompt)
 
 
-def test_build_llm_prompt_custom_template_without_language_block_still_injects() -> None:
-    """Custom prompt that lacks STRICT LANGUAGE MATCH — inject still works."""
-    custom = "Custom editor. <CRITICAL_CONSTRAINTS>\n1. Be concise.\n</CRITICAL_CONSTRAINTS>"
+def test_build_llm_prompt_vibecoding_custom_vibe_overrides_default() -> None:
+    """A custom vibe template fully replaces the built-in vibecoding template."""
+    custom_vibe = "Minimal vibe: {dictionary}. FORCED ENGLISH OUTPUT."
 
-    prompt = build_llm_system_prompt(["Y"], custom_template=custom, usage_mode="vibecoding")
+    prompt = build_llm_system_prompt(
+        ["Y"], usage_mode="vibecoding", custom_vibe_template=custom_vibe
+    )
 
-    assert has_vibe_coding_block(prompt)
-    assert "VIBE CODING PROTOCOL" in prompt
+    assert "Minimal vibe" in prompt
+    assert "Y" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -196,14 +203,12 @@ def test_build_llm_prompt_strips_embedded_vibe_block_from_stored_prompt() -> Non
     assert not has_vibe_coding_block(prompt)
 
 
-def test_build_llm_prompt_strips_then_reinjects_for_vibecoding_custom() -> None:
-    """If a stored custom prompt already has an embedded vibe block, strip it
-    first, then apply the clean inject + neutralize pipeline."""
-    stored = inject_vibe_coding_block(DEFAULT_LLM_PROMPT_TEMPLATE)
+def test_build_llm_prompt_vibecoding_empty_vibe_uses_default_template() -> None:
+    """When vibecoding mode with no custom vibe template, uses built-in VIBECODING template."""
 
-    prompt = build_llm_system_prompt(["MLX"], custom_template=stored, usage_mode="vibecoding")
+    prompt = build_llm_system_prompt(["MLX"], usage_mode="vibecoding", custom_vibe_template="")
 
-    assert has_vibe_coding_block(prompt)
+    assert "FORCED ENGLISH OUTPUT" in prompt
     assert "STRICT LANGUAGE MATCH" not in prompt
 
 

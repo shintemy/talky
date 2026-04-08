@@ -161,9 +161,14 @@ _ZH = {
     "usage_mode_vibecoding": "Vibecoding",
     # Prompt tab
     "prompt": "Prompt",
-    "prompt_section_title": "LLM System Prompt",
+    "prompt_section_title": "For Daily Usage",
     "prompt_hint": "使用 {dictionary} 插入自定义词典内容。留空则使用内置默认 Prompt。",
     "prompt_restore_default": "恢复默认",
+    "prompt_edit": "编辑",
+    "prompt_save": "保存",
+    "prompt_cancel": "取消",
+    "prompt_vibe_section_title": "For Vibecoding",
+    "prompt_vibe_hint": "Vibecoding 模式的专用 Prompt。留空则使用内置默认 Prompt。",
     "live_recording_title": "正在录音",
     "live_recording_subtitle": "松开 Fn 结束录音",
     "live_processing_title": "正在识别",
@@ -1237,16 +1242,37 @@ class DictionaryTab(QWidget):
 # ---------------------------------------------------------------------------
 
 class PromptTab(QWidget):
-    prompt_changed = pyqtSignal(str)
+
+    _READONLY_STYLE = (
+        "QPlainTextEdit { font-size: 12px; font-family: 'Menlo', monospace;"
+        " border: 1px solid #D1D1D6; border-radius: 5px; background: #F5F5F7;"
+        " padding: 8px; color: #6E6E73; }"
+    )
+    _EDITABLE_STYLE = (
+        "QPlainTextEdit { font-size: 12px; font-family: 'Menlo', monospace;"
+        " border: 1px solid #D1D1D6; border-radius: 5px; background: #FFFFFF;"
+        " padding: 8px; color: #1D1D1F; }"
+        "QPlainTextEdit:focus { border: 2px solid rgba(237, 74, 32, 0.55); padding: 7px; }"
+    )
+    _LINK_STYLE = (
+        "QPushButton#LinkButton { color: #ED4A20; font-size: 11px; border: none; }"
+        "QPushButton#LinkButton:hover { color: #C43A18; text-decoration: underline; }"
+    )
 
     def __init__(self, controller: AppController, locale: str = "en", parent=None):
         super().__init__(parent)
         self.controller = controller
         self._locale = locale
 
-        from talky.prompting import DEFAULT_LLM_PROMPT_TEMPLATE
+        from talky.prompting import DEFAULT_LLM_PROMPT_TEMPLATE, VIBECODING_LLM_PROMPT_TEMPLATE
 
-        self._default_template = DEFAULT_LLM_PROMPT_TEMPLATE
+        self._daily_default = DEFAULT_LLM_PROMPT_TEMPLATE
+        self._vibe_default = VIBECODING_LLM_PROMPT_TEMPLATE
+
+        self._daily_editing = False
+        self._daily_snapshot = ""
+        self._vibe_editing = False
+        self._vibe_snapshot = ""
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -1259,118 +1285,214 @@ class PromptTab(QWidget):
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 8, 0, 0)
-        content_layout.setSpacing(12)
+        content_layout.setSpacing(16)
 
-        section = QFrame()
-        section.setObjectName("SectionFrame")
-        sec_layout = QVBoxLayout(section)
-        sec_layout.setContentsMargins(16, 14, 16, 14)
-        sec_layout.setSpacing(10)
-
-        self._title_label = QLabel(
-            _tr(locale, "LLM System Prompt", "prompt_section_title")
-        )
-        self._title_label.setStyleSheet(
-            "font-size: 13px; font-weight: 600; color: #1D1D1F;"
-        )
-        sec_layout.addWidget(self._title_label)
-
-        self._editor = QPlainTextEdit()
-        self._editor.setMinimumHeight(260)
-        self._editor.setStyleSheet(
-            "QPlainTextEdit { font-size: 12px; font-family: 'Menlo', monospace;"
-            " border: 1px solid #D1D1D6; border-radius: 5px; background: #FFFFFF;"
-            " padding: 8px; color: #1D1D1F; }"
-            "QPlainTextEdit:focus { border: 2px solid rgba(237, 74, 32, 0.55); padding: 7px; }"
-        )
-        sec_layout.addWidget(self._editor)
-        self._prompt_sync_timer = QTimer(self)
-        self._prompt_sync_timer.setSingleShot(True)
-        self._prompt_sync_timer.setInterval(300)
-        self._prompt_sync_timer.timeout.connect(self._emit_prompt_changed)
-        self._editor.textChanged.connect(self._on_editor_text_changed)
-
-        hint_row = QHBoxLayout()
-        hint_row.setSpacing(0)
-        self._hint_label = QLabel(
-            _tr(
-                locale,
+        # --- Daily module ---
+        daily_section, self._daily_widgets = self._build_prompt_module(
+            title_key="prompt_section_title",
+            title_en="For Daily Usage",
+            hint_key="prompt_hint",
+            hint_en=(
                 "Use {dictionary} to insert custom dictionary terms. "
-                "Leave empty to use the built-in default.",
-                "prompt_hint",
-            )
+                "Leave empty to use the built-in default."
+            ),
         )
-        self._hint_label.setWordWrap(True)
-        self._hint_label.setStyleSheet("font-size: 11px; color: #86868B;")
-        hint_row.addWidget(self._hint_label, 1)
-        hint_row.addSpacing(12)
+        self._daily_widgets["edit_btn"].clicked.connect(self._daily_enter_edit)
+        self._daily_widgets["save_btn"].clicked.connect(self._daily_save)
+        self._daily_widgets["cancel_btn"].clicked.connect(self._daily_cancel)
+        self._daily_widgets["restore_btn"].clicked.connect(
+            lambda: self._daily_widgets["editor"].setPlainText(self._daily_default)
+        )
+        content_layout.addWidget(daily_section)
 
-        self._restore_btn = QPushButton(
-            _tr(locale, "Restore Default", "prompt_restore_default")
+        # --- Vibecoding module ---
+        vibe_section, self._vibe_widgets = self._build_prompt_module(
+            title_key="prompt_vibe_section_title",
+            title_en="For Vibecoding",
+            hint_key="prompt_vibe_hint",
+            hint_en=(
+                "Dedicated prompt for Vibecoding mode. "
+                "Leave empty to use the built-in default."
+            ),
         )
-        self._restore_btn.setObjectName("LinkButton")
-        self._restore_btn.setStyleSheet(
-            "QPushButton#LinkButton { color: #ED4A20; font-size: 11px; }"
-            "QPushButton#LinkButton:hover { color: #C43A18; text-decoration: underline; }"
+        self._vibe_widgets["edit_btn"].clicked.connect(self._vibe_enter_edit)
+        self._vibe_widgets["save_btn"].clicked.connect(self._vibe_save)
+        self._vibe_widgets["cancel_btn"].clicked.connect(self._vibe_cancel)
+        self._vibe_widgets["restore_btn"].clicked.connect(
+            lambda: self._vibe_widgets["editor"].setPlainText(self._vibe_default)
         )
-        self._restore_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._restore_btn.clicked.connect(self._restore_default)
-        hint_row.addWidget(self._restore_btn)
-        sec_layout.addLayout(hint_row)
+        content_layout.addWidget(vibe_section)
 
-        content_layout.addWidget(section)
         content_layout.addStretch()
         scroll.setWidget(content)
         outer.addWidget(scroll)
+
+    # ---- factory ----
+
+    def _build_prompt_module(
+        self, *, title_key: str, title_en: str, hint_key: str, hint_en: str
+    ) -> tuple[QFrame, dict]:
+        section = QFrame()
+        section.setObjectName("SectionFrame")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_label = QLabel(_tr(self._locale, title_en, title_key))
+        title_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #1D1D1F;")
+        title_row.addWidget(title_label)
+        title_row.addStretch()
+
+        restore_btn = QPushButton(_tr(self._locale, "Restore Default", "prompt_restore_default"))
+        restore_btn.setObjectName("LinkButton")
+        restore_btn.setStyleSheet(self._LINK_STYLE)
+        restore_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        restore_btn.setVisible(False)
+
+        cancel_btn = QPushButton(_tr(self._locale, "Cancel", "prompt_cancel"))
+        cancel_btn.setObjectName("LinkButton")
+        cancel_btn.setStyleSheet(self._LINK_STYLE)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setVisible(False)
+
+        save_btn = QPushButton(_tr(self._locale, "Save", "prompt_save"))
+        save_btn.setObjectName("LinkButton")
+        save_btn.setStyleSheet(
+            "QPushButton#LinkButton { color: #FFFFFF; font-size: 11px; font-weight: 600;"
+            " background: #ED4A20; border: none; border-radius: 4px; padding: 3px 12px; }"
+            "QPushButton#LinkButton:hover { background: #C43A18; }"
+        )
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.setVisible(False)
+
+        edit_btn = QPushButton(_tr(self._locale, "Edit", "prompt_edit"))
+        edit_btn.setObjectName("LinkButton")
+        edit_btn.setStyleSheet(self._LINK_STYLE)
+        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        title_row.addWidget(restore_btn)
+        title_row.addWidget(cancel_btn)
+        title_row.addWidget(save_btn)
+        title_row.addWidget(edit_btn)
+        layout.addLayout(title_row)
+
+        editor = QPlainTextEdit()
+        editor.setMinimumHeight(200)
+        editor.setReadOnly(True)
+        editor.setStyleSheet(self._READONLY_STYLE)
+        layout.addWidget(editor)
+
+        hint_label = QLabel(_tr(self._locale, hint_en, hint_key))
+        hint_label.setWordWrap(True)
+        hint_label.setStyleSheet("font-size: 11px; color: #86868B;")
+        layout.addWidget(hint_label)
+
+        widgets = {
+            "title_label": title_label,
+            "title_key": title_key,
+            "title_en": title_en,
+            "editor": editor,
+            "hint_label": hint_label,
+            "hint_key": hint_key,
+            "hint_en": hint_en,
+            "edit_btn": edit_btn,
+            "save_btn": save_btn,
+            "cancel_btn": cancel_btn,
+            "restore_btn": restore_btn,
+        }
+        return section, widgets
+
+    def _set_module_editing(self, widgets: dict, editing: bool) -> None:
+        widgets["editor"].setReadOnly(not editing)
+        widgets["editor"].setStyleSheet(
+            self._EDITABLE_STYLE if editing else self._READONLY_STYLE
+        )
+        widgets["edit_btn"].setVisible(not editing)
+        widgets["save_btn"].setVisible(editing)
+        widgets["cancel_btn"].setVisible(editing)
+        widgets["restore_btn"].setVisible(editing)
+
+    # ---- Daily module state ----
+
+    def _daily_enter_edit(self) -> None:
+        self._daily_snapshot = self._daily_widgets["editor"].toPlainText()
+        self._daily_editing = True
+        self._set_module_editing(self._daily_widgets, True)
+
+    def _daily_save(self) -> None:
+        text = self._daily_widgets["editor"].toPlainText().strip()
+        normalized = "" if text == self._daily_default.strip() else text
+        self.controller.update_custom_llm_prompt(normalized)
+        self._daily_editing = False
+        self._set_module_editing(self._daily_widgets, False)
+
+    def _daily_cancel(self) -> None:
+        self._daily_widgets["editor"].setPlainText(self._daily_snapshot)
+        self._daily_editing = False
+        self._set_module_editing(self._daily_widgets, False)
+
+    # ---- Vibe module state ----
+
+    def _vibe_enter_edit(self) -> None:
+        self._vibe_snapshot = self._vibe_widgets["editor"].toPlainText()
+        self._vibe_editing = True
+        self._set_module_editing(self._vibe_widgets, True)
+
+    def _vibe_save(self) -> None:
+        text = self._vibe_widgets["editor"].toPlainText().strip()
+        normalized = "" if text == self._vibe_default.strip() else text
+        self.controller.update_custom_vibe_prompt(normalized)
+        self._vibe_editing = False
+        self._set_module_editing(self._vibe_widgets, False)
+
+    def _vibe_cancel(self) -> None:
+        self._vibe_widgets["editor"].setPlainText(self._vibe_snapshot)
+        self._vibe_editing = False
+        self._set_module_editing(self._vibe_widgets, False)
+
+    # ---- cancel all in-progress edits (called on tab switch / close) ----
+
+    def cancel_all_edits(self) -> None:
+        if self._daily_editing:
+            self._daily_cancel()
+        if self._vibe_editing:
+            self._vibe_cancel()
+
+    # ---- load / locale ----
 
     def load_from_settings(self, settings: AppSettings) -> None:
         self._locale = settings.ui_locale
         from talky.prompting import strip_vibe_coding_block
 
-        raw = settings.custom_llm_prompt or self._default_template
-        template = strip_vibe_coding_block(raw)
-        if not template.strip():
-            template = self._default_template
-        if self._editor.toPlainText() != template:
-            self._editor.setPlainText(template)
+        if not self._daily_editing:
+            raw_daily = settings.custom_llm_prompt or self._daily_default
+            daily_text = strip_vibe_coding_block(raw_daily)
+            if not daily_text.strip():
+                daily_text = self._daily_default
+            if self._daily_widgets["editor"].toPlainText() != daily_text:
+                self._daily_widgets["editor"].setPlainText(daily_text)
+
+        if not self._vibe_editing:
+            vibe_text = settings.custom_vibe_prompt or self._vibe_default
+            if not vibe_text.strip():
+                vibe_text = self._vibe_default
+            if self._vibe_widgets["editor"].toPlainText() != vibe_text:
+                self._vibe_widgets["editor"].setPlainText(vibe_text)
+
         self._apply_locale_texts()
 
-    def collect_prompt(self) -> str:
-        text = self._editor.toPlainText().strip()
-        if text == self._default_template.strip():
-            return ""
-        return text
-
-    def set_prompt_text(self, text: str) -> None:
-        """Replace editor content (used by SettingsWindow to inject/strip mode blocks)."""
-        current = self._editor.toPlainText()
-        if current != text:
-            self._editor.setPlainText(text)
-
-    def _restore_default(self) -> None:
-        self._editor.setPlainText(self._default_template)
-
-    def _on_editor_text_changed(self) -> None:
-        self._prompt_sync_timer.start()
-
-    def _emit_prompt_changed(self) -> None:
-        self.prompt_changed.emit(self.collect_prompt())
-
     def _apply_locale_texts(self) -> None:
-        self._title_label.setText(
-            _tr(self._locale, "LLM System Prompt", "prompt_section_title")
-        )
-        self._hint_label.setText(
-            _tr(
-                self._locale,
-                "Use {dictionary} to insert custom dictionary terms. "
-                "Leave empty to use the built-in default.",
-                "prompt_hint",
+        for w in (self._daily_widgets, self._vibe_widgets):
+            w["title_label"].setText(_tr(self._locale, w["title_en"], w["title_key"]))
+            w["hint_label"].setText(_tr(self._locale, w["hint_en"], w["hint_key"]))
+            w["edit_btn"].setText(_tr(self._locale, "Edit", "prompt_edit"))
+            w["save_btn"].setText(_tr(self._locale, "Save", "prompt_save"))
+            w["cancel_btn"].setText(_tr(self._locale, "Cancel", "prompt_cancel"))
+            w["restore_btn"].setText(
+                _tr(self._locale, "Restore Default", "prompt_restore_default")
             )
-        )
-        self._restore_btn.setText(
-            _tr(self._locale, "Restore Default", "prompt_restore_default")
-        )
 
     def update_locale(self, locale: str) -> None:
         self._locale = locale
@@ -1978,7 +2100,7 @@ class ConfigsTab(QWidget):
 
     # -- Save / Reset --
 
-    def _save_settings(self, *, quiet: bool = False, custom_llm_prompt: str = "") -> None:
+    def _save_settings(self, *, quiet: bool = False) -> None:
         collected = self.collect_settings()
 
         hotkey_mode = collected["hotkey"]
@@ -2037,7 +2159,8 @@ class ConfigsTab(QWidget):
             mode=selected_mode,
             cloud_api_url=collected["cloud_api_url"],
             cloud_api_key=collected["cloud_api_key"],
-            custom_llm_prompt=custom_llm_prompt,
+            custom_llm_prompt=self.controller.settings.custom_llm_prompt,
+            custom_vibe_prompt=self.controller.settings.custom_vibe_prompt,
             usage_mode=collected.get("usage_mode", "daily"),
         )
         QTimer.singleShot(0, lambda s=settings, q=quiet: self._apply_settings_deferred(s, q))
@@ -2141,7 +2264,6 @@ class SettingsWindow(QWidget):
         self._stack.addWidget(self._configs_tab)
 
         self._tab_group.idClicked.connect(self._on_tab_changed)
-        self._prompt_tab.prompt_changed.connect(self._persist_prompt_draft)
 
         # ---- Layout (native — no wrapper container) ----
         root = QVBoxLayout(self)
@@ -2164,7 +2286,7 @@ class SettingsWindow(QWidget):
     def _on_tab_changed(self, tab_id: int) -> None:
         previous_tab_id = self._stack.currentIndex()
         if previous_tab_id == 3 and tab_id != 3:
-            self._persist_prompt_draft(self._prompt_tab.collect_prompt())
+            self._prompt_tab.cancel_all_edits()
         self._stack.setCurrentIndex(tab_id)
         if tab_id == 1:
             self._history_tab.refresh()
@@ -2183,19 +2305,15 @@ class SettingsWindow(QWidget):
         self._configs_tab.load_from_settings(settings)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._prompt_tab.cancel_all_edits()
         self._auto_save_configs()
         super().closeEvent(event)
 
     def _auto_save_configs(self) -> None:
         try:
-            prompt = self._prompt_tab.collect_prompt()
-            self._persist_prompt_draft(prompt)
-            self._configs_tab._save_settings(quiet=True, custom_llm_prompt=prompt)  # noqa: SLF001
+            self._configs_tab._save_settings(quiet=True)  # noqa: SLF001
         except Exception:
             pass
-
-    def _persist_prompt_draft(self, prompt: str) -> None:
-        self.controller.update_custom_llm_prompt(prompt, emit_settings_updated=False)
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
