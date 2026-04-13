@@ -2,11 +2,46 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.request
 
 import ollama
 
 from talky.prompting import build_llm_system_prompt, build_selection_rewrite_prompt
+
+# Gemma 4 uses `<channel|>` as a thinking→answer separator inside `content`.
+# Other models may leak `<|think|>` or similar markers.
+_OTHER_CONTROL_RE = re.compile(r"<\|[^|]*\|>", re.IGNORECASE)
+
+_CHANNEL_MARKER = "<channel|>"
+
+
+def _split_on_channel_marker(text: str) -> str:
+    """Gemma 4 emits `<channel|>` between thinking and the real answer.
+
+    Take only the text after the LAST `<channel|>`.  This single step resolves the
+    vast majority of leaked chain-of-thought from Gemma-class models.
+    """
+    idx = text.rfind(_CHANNEL_MARKER)
+    if idx >= 0:
+        return text[idx + len(_CHANNEL_MARKER) :].strip()
+    # Also handle case-insensitive or slightly variant forms.
+    lower = text.lower()
+    idx = lower.rfind("<channel|>")
+    if idx >= 0:
+        return text[idx + len("<channel|>") :].strip()
+    return text
+
+
+def _strip_other_control_tokens(text: str) -> str:
+    cleaned = _OTHER_CONTROL_RE.sub("", text)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _sanitize_llm_surface_text(output: str) -> str:
+    text = _split_on_channel_marker(output)
+    return _strip_other_control_tokens(text)
 
 
 class OllamaTextCleaner:
@@ -69,6 +104,7 @@ class OllamaTextCleaner:
         if self.debug_stream:
             print()
         final = "".join(parts).strip()
+        final = _sanitize_llm_surface_text(final)
         if final:
             return final
         # Never surface model thinking as final content.
@@ -112,6 +148,7 @@ class OllamaTextCleaner:
             if piece:
                 parts.append(piece)
         final = "".join(parts).strip()
+        final = _sanitize_llm_surface_text(final)
         if final:
             return final
         return selected_text.strip()

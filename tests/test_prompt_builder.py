@@ -19,6 +19,8 @@ def test_build_asr_prompt_contains_dictionary_terms() -> None:
     assert "MLX" in prompt
     assert "Qwen" in prompt
     assert "Alice Chen" in prompt
+    assert "Mandarin" in prompt or "Chinese" in prompt
+    assert "English" in prompt
 
 
 def test_build_llm_prompt_includes_required_rules() -> None:
@@ -26,22 +28,18 @@ def test_build_llm_prompt_includes_required_rules() -> None:
 
     prompt = build_llm_system_prompt(dictionary)
 
-    assert "You are a Dictation Transcription Editor" in prompt
-    assert "STRICT LANGUAGE MATCH" in prompt
-    assert "NEVER translate" in prompt
-    assert "Mixed-language input" in prompt
-    assert "STRICT PERSPECTIVE" in prompt
-    assert "NO ADDITIONS" in prompt
+    assert "Dictation Transcription Editor" in prompt
+    assert "LANGUAGE" in prompt
+    assert "Chinese" in prompt
+    assert "PERSPECTIVE" in prompt
+    assert "PURE TEXT ONLY" in prompt
     assert "PRESERVE SENTENCE TYPE" in prompt
-    assert "NEVER generate a conversational" in prompt
-    assert "NOISE REDUCTION" in prompt
-    assert "HIGH INFORMATION DENSITY" in prompt
-    assert "STRUCTURAL REORGANIZATION" in prompt
-    assert "Short Question: Output exactly one cleanly formatted question sentence" in prompt
-    assert "<TYPOGRAPHY_RULES>" in prompt
-    assert "PANGU SPACING (Crucial)" in prompt
-    assert "NUMBER SPACING" in prompt
-    assert "Strictly use full-width punctuation (，。！？) in Chinese context" in prompt
+    assert "never as a conversation" in prompt
+    assert "<EDITING>" in prompt
+    assert "<TYPOGRAPHY>" in prompt
+    assert "我的 Mac 电脑" in prompt
+    assert "优化了 3 个功能" in prompt
+    assert "全角标点" in prompt
     assert "<DICTIONARY>" in prompt
     assert "Raw Transcript:" in prompt
     assert "[INSERT_USER_TEXT_HERE]" in prompt
@@ -57,8 +55,8 @@ def test_build_llm_prompt_includes_required_rules() -> None:
 def test_build_llm_prompt_daily_uses_default_template() -> None:
     prompt = build_llm_system_prompt(["MLX"], usage_mode="daily")
 
-    assert "STRICT LANGUAGE MATCH" in prompt
-    assert "NEVER translate" in prompt
+    assert "LANGUAGE" in prompt
+    assert "Chinese" in prompt
     assert "FORCED ENGLISH OUTPUT" not in prompt
     assert not has_vibe_coding_block(prompt)
 
@@ -78,16 +76,15 @@ def test_build_llm_prompt_vibecoding_uses_dedicated_template() -> None:
 def test_vibecoding_template_no_chinese_typography() -> None:
     prompt = build_llm_system_prompt([], usage_mode="vibecoding")
 
-    assert "PANGU SPACING (Crucial)" not in prompt
-    assert "full-width punctuation" not in prompt
+    assert "我的 Mac 电脑" not in prompt
+    assert "全角标点" not in prompt
     assert "standard English punctuation" in prompt
 
 
 def test_vibecoding_template_preserves_structural_constraints() -> None:
     prompt = build_llm_system_prompt([], usage_mode="vibecoding")
 
-    assert "STRICT PERSPECTIVE" in prompt
-    assert "NO ADDITIONS" in prompt
+    assert "PERSPECTIVE" in prompt
     assert "PRESERVE SENTENCE TYPE" in prompt
     assert "Raw Transcript:" in prompt
     assert "<DICTIONARY>" in prompt
@@ -149,13 +146,22 @@ def test_build_llm_prompt_vibecoding_custom_vibe_overrides_default() -> None:
 
 
 def test_inject_vibe_coding_block_inserts_before_critical_constraints() -> None:
-    result = inject_vibe_coding_block(DEFAULT_LLM_PROMPT_TEMPLATE)
+    from talky.prompting import LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_VERBOSE_V050
+
+    result = inject_vibe_coding_block(LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_VERBOSE_V050)
 
     assert has_vibe_coding_block(result)
     assert "VIBE CODING PROTOCOL" in result
     vibe_pos = result.find("<VIBE_CODING_MODE_ACTIVE>")
     crit_pos = result.find("<CRITICAL_CONSTRAINTS>")
     assert vibe_pos < crit_pos, "Vibe block must appear BEFORE <CRITICAL_CONSTRAINTS>"
+
+
+def test_inject_vibe_coding_block_prepends_for_new_default_template() -> None:
+    result = inject_vibe_coding_block(DEFAULT_LLM_PROMPT_TEMPLATE)
+
+    assert has_vibe_coding_block(result)
+    assert result.startswith("<VIBE_CODING_MODE_ACTIVE>")
 
 
 def test_inject_vibe_coding_block_prepends_for_custom_prompt() -> None:

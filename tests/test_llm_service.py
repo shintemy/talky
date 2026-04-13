@@ -20,6 +20,84 @@ def _load_llm_service_with_fake_ollama(chat_impl, generate_impl=None):
     return importlib.import_module("talky.llm_service")
 
 
+def test_clean_splits_on_channel_marker_takes_answer_only() -> None:
+    """Gemma 4's <channel|> separates thinking from answer. Only the answer should survive."""
+    bad = (
+        "The user is asking for advice on naming a TTS product.\n"
+        "Plan:\n1. Identify the core question.\n"
+        "2. Clean up the phrasing.\n"
+        "<channel|>如果我想给这个产品命名，是叫 Mockingbird 好，还是叫鹦鹉更好呢？"
+    )
+
+    def chat_impl(**kwargs):  # noqa: ANN003
+        del kwargs
+        return [{"message": {"content": bad, "thinking": ""}}]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+    source = "如果是想命名的话TTS的产品应该命名成Mockingbird还是鹦鹉比较好"
+
+    result = cleaner.clean(raw_text=source, dictionary_terms=[])
+
+    assert "The user is" not in result
+    assert "Plan:" not in result
+    assert "<channel" not in result
+    assert "Mockingbird" in result
+    assert "鹦鹉" in result
+
+
+def test_clean_splits_on_channel_marker_simple_case() -> None:
+    bad = (
+        "The user input is \"你好\".\nThis is a simple greeting.\n"
+        "<channel|>你好"
+    )
+
+    def chat_impl(**kwargs):  # noqa: ANN003
+        del kwargs
+        return [{"message": {"content": bad, "thinking": ""}}]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+
+    result = cleaner.clean(raw_text="你好你好你好你好你好你好你好", dictionary_terms=[])
+
+    assert result == "你好"
+
+
+def test_clean_no_channel_marker_passes_through() -> None:
+    """Without <channel|>, output passes through unchanged (no false-positive stripping)."""
+    mixed = "OK let me explain this concept.然后我们再来看下一步。"
+
+    def chat_impl(**kwargs):  # noqa: ANN003
+        del kwargs
+        return [{"message": {"content": mixed, "thinking": ""}}]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+
+    result = cleaner.clean(raw_text="OK let me explain 然后我们再来看下一步", dictionary_terms=[])
+
+    assert "OK let me explain" in result
+    assert "然后我们再来看下一步" in result
+
+
+def test_clean_strips_control_tokens_without_channel_marker() -> None:
+    bad = "整理后<|think|>文本"
+
+    def chat_impl(**kwargs):  # noqa: ANN003
+        del kwargs
+        return [{"message": {"content": bad, "thinking": ""}}]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+
+    result = cleaner.clean(raw_text="原始文本", dictionary_terms=[])
+
+    assert "<|think|>" not in result
+    assert "整理后" in result
+    assert "文本" in result
+
+
 def test_clean_uses_content_stream_when_available() -> None:
     def chat_impl(**kwargs):  # noqa: ANN003
         del kwargs

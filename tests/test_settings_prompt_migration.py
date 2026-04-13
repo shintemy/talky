@@ -3,6 +3,7 @@ from talky.prompting import (
     DEFAULT_LLM_PROMPT_TEMPLATE,
     LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_NO_TYPOGRAPHY,
     LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_V044,
+    LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_VERBOSE_V050,
 )
 
 
@@ -11,6 +12,7 @@ def test_from_dict_clears_legacy_builtin_prompt_snapshots() -> None:
         DEFAULT_LLM_PROMPT_TEMPLATE,
         LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_V044,
         LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_NO_TYPOGRAPHY,
+        LEGACY_DEFAULT_LLM_PROMPT_TEMPLATE_VERBOSE_V050,
     ):
         loaded = AppSettings.from_dict({"custom_llm_prompt": template})
         assert loaded.custom_llm_prompt == ""
