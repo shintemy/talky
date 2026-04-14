@@ -462,7 +462,6 @@ class AppController(QObject):
             self.recorder.start()
             self._is_recording = True
             self._emit_pipeline_state("recording", source="hotkey_pressed")
-            self.status_signal.emit("Recording started...")
         except sd.PortAudioError as exc:
             self.error_signal.emit(self._format_microphone_portaudio_error(exc))
         except Exception as exc:
@@ -472,52 +471,24 @@ class AppController(QObject):
         if not self._is_recording:
             return
         try:
-            wav_path = self.recorder.stop_and_dump_wav()
+            detached = self.recorder.stop_and_detach()
             self._is_recording = False
-            duration_s = self.recorder.last_duration_s
-            rms = self.recorder.last_rms
-            if duration_s < _MIN_RECORD_DURATION_S:
-                self.status_signal.emit(
-                    f"Recording too short ({duration_s*1000:.0f}ms). Ignored."
-                )
-                wav_path.unlink(missing_ok=True)
-                self._emit_pipeline_state("idle", source="record_too_short")
-                return
-            if rms < _MIN_RECORD_RMS:
-                self.status_signal.emit(
-                    f"Audio too quiet (rms={rms:.4f}). Ignored."
-                )
-                wav_path.unlink(missing_ok=True)
-                self._emit_pipeline_state("idle", source="record_too_quiet")
-                return
-            self.status_signal.emit("Recording stopped. Processing...")
+
+            front_app = get_frontmost_app()
+            self._remember_target_front_app(front_app)
+            has_focus = has_focus_target(front_app)
+            if front_app is not None and has_focus:
+                self._last_focus_target_pid = front_app.pid
+
             self._emit_pipeline_state("processing", source="record_released")
             self._is_processing = True
             self._processing_started_ts = time.monotonic()
-            asr_timeout_s = max(_ASR_STEP_TIMEOUT_S, estimate_asr_timeout_seconds(duration_s))
-            self._processing_timeout_s = max(
-                _PROCESSING_TIMEOUT_S,
-                estimate_processing_timeout_seconds(
-                    duration_s,
-                    llm_timeout_seconds=_LLM_STEP_TIMEOUT_S,
-                ),
-            )
-            append_debug_log(
-                "processing timeout policy: "
-                f"audio_duration={duration_s:.2f}s; asr_timeout={asr_timeout_s:.1f}s; "
-                f"overall_timeout={self._processing_timeout_s:.1f}s"
-            )
-            self._processing_wav_path = wav_path
             self._processing_generation += 1
             generation = self._processing_generation
-            selected_text_snapshot = ""
-            front_app = get_frontmost_app()
-            self._remember_target_front_app(front_app)
-            if has_focus_target(front_app):
-                selected_text_snapshot = self.paster.capture_selected_text()
+
             worker = threading.Thread(
                 target=self._process_pipeline,
-                args=(wav_path, generation, asr_timeout_s, selected_text_snapshot),
+                args=(detached, generation, has_focus),
                 daemon=True,
             )
             worker.start()
@@ -535,7 +506,6 @@ class AppController(QObject):
         self._processing_started_ts = 0.0
         append_debug_log(f"processing cancelled: source={source}")
         self._emit_pipeline_state("idle", source=source)
-        self.status_signal.emit("Current processing cancelled.")
         wav_path = self._processing_wav_path
         self._processing_wav_path = None
         if wav_path is not None:
@@ -600,11 +570,9 @@ class AppController(QObject):
             raise RuntimeError("ASR returned empty text. Please retry.")
         corrected_raw_text = apply_phonetic_dictionary(raw_text, dict_terms)
         if len(corrected_raw_text.replace(" ", "").strip()) < 2:
-            self.status_signal.emit("ASR text too short. LLM step skipped.")
             return ""
 
         if selected_text_snapshot and looks_like_edit_instruction(corrected_raw_text):
-            self.status_signal.emit("Detected edit instruction on selected text.")
             rewritten_text = run_with_timeout(
                 lambda: self.llm.rewrite_selected_text(
                     selected_text=selected_text_snapshot,
@@ -645,12 +613,49 @@ class AppController(QObject):
 
     def _process_pipeline(
         self,
-        wav_path: Path,
+        detached: tuple,
         generation: int,
-        asr_timeout_s: float,
-        selected_text_snapshot: str = "",
+        has_focus: bool,
     ) -> None:
+        stream, chunks, sample_rate = detached
+        wav_path: Path | None = None
         try:
+            if generation != self._processing_generation:
+                self.recorder._safe_close_stream(stream)
+                return
+
+            wav_path, duration_s, rms = self.recorder.close_and_dump_wav(
+                stream, chunks, sample_rate,
+            )
+
+            if duration_s < _MIN_RECORD_DURATION_S:
+                wav_path.unlink(missing_ok=True)
+                wav_path = None
+                return
+            if rms < _MIN_RECORD_RMS:
+                wav_path.unlink(missing_ok=True)
+                wav_path = None
+                return
+
+            asr_timeout_s = max(_ASR_STEP_TIMEOUT_S, estimate_asr_timeout_seconds(duration_s))
+            self._processing_timeout_s = max(
+                _PROCESSING_TIMEOUT_S,
+                estimate_processing_timeout_seconds(
+                    duration_s,
+                    llm_timeout_seconds=_LLM_STEP_TIMEOUT_S,
+                ),
+            )
+            append_debug_log(
+                "processing timeout policy: "
+                f"audio_duration={duration_s:.2f}s; asr_timeout={asr_timeout_s:.1f}s; "
+                f"overall_timeout={self._processing_timeout_s:.1f}s"
+            )
+            self._processing_wav_path = wav_path
+
+            selected_text_snapshot = ""
+            if has_focus:
+                selected_text_snapshot = self.paster.capture_selected_text()
+
             if generation != self._processing_generation:
                 return
             if self.is_cloud_mode:
@@ -668,7 +673,6 @@ class AppController(QObject):
 
             now = time.monotonic()
             if final_text == self._last_output_text and (now - self._last_output_ts) < 1.2:
-                self.status_signal.emit("Duplicate output suppressed.")
                 return
             self._last_output_text = final_text
             self._last_output_ts = now
@@ -680,10 +684,8 @@ class AppController(QObject):
             current_front_app = get_frontmost_app()
             if self._should_paste_to_focus_target(current_front_app):
                 self.paste_to_front_signal.emit(final_text)
-                self.status_signal.emit("Pasted to current focus target.")
             else:
                 self.show_result_popup_signal.emit(final_text)
-                self.status_signal.emit("No focus target detected. Showing floating panel.")
         except FileNotFoundError as exc:
             if "Whisper model path not found" in str(exc):
                 self.error_signal.emit("__MODEL_NOT_FOUND__")
@@ -698,10 +700,11 @@ class AppController(QObject):
                 self._processing_timeout_s = _PROCESSING_TIMEOUT_S
                 self._processing_wav_path = None
                 self._emit_pipeline_state("idle", source="pipeline_finally")
-            try:
-                wav_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            if wav_path is not None:
+                try:
+                    wav_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     def _emit_pipeline_state(self, state: str, *, source: str) -> None:
         previous = self._last_pipeline_state

@@ -131,9 +131,12 @@ class AudioRecorder:
         if stream is None:
             return
         try:
-            stream.stop()
+            stream.abort()
         except Exception:
-            pass
+            try:
+                stream.stop()
+            except Exception:
+                pass
         try:
             stream.close()
         except Exception:
@@ -153,30 +156,51 @@ class AudioRecorder:
             except Exception:
                 pass
 
-    def stop_and_dump_wav(self) -> Path:
+    def stop_and_detach(self) -> tuple:
+        """Non-blocking: detach stream and audio chunks for async finalization.
+
+        Returns ``(stream, chunks_copy, sample_rate)``.  The caller must
+        pass these to :meth:`close_and_dump_wav` (which may block) on a
+        worker thread.
+        """
         if self._stream is None:
             raise RuntimeError("Recorder is not running.")
-
         stream = self._stream
         self._stream = None
+        chunks = list(self._chunks)
+        self._chunks.clear()
+        sample_rate = self._active_sample_rate
+        self._last_duration_s = 0.0
+        self._last_rms = 0.0
+        return stream, chunks, sample_rate
+
+    def close_and_dump_wav(
+        self,
+        stream,
+        chunks: list[array.array],
+        sample_rate: float,
+    ) -> tuple[Path, float, float]:
+        """Close a detached stream and write audio chunks to WAV.
+
+        May block on PortAudio stream shutdown — safe to call from any
+        thread.  Returns ``(wav_path, duration_s, rms)``.
+        """
         self._safe_close_stream(stream)
 
-        if not self._chunks:
+        if not chunks:
             raise RuntimeError("No audio captured.")
 
         full = array.array("f")
-        for c in self._chunks:
+        for c in chunks:
             full.extend(c)
 
         n = len(full)
-        self._last_duration_s = (
-            float(n) / float(self._active_sample_rate) if self._active_sample_rate > 0 else 0.0
-        )
+        duration_s = float(n) / float(sample_rate) if sample_rate > 0 else 0.0
         if n > 0:
             mean_sq = sum(x * x for x in full) / float(n)
-            self._last_rms = math.sqrt(mean_sq)
+            rms = math.sqrt(mean_sq)
         else:
-            self._last_rms = 0.0
+            rms = 0.0
 
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         path = Path(tmp.name)
@@ -189,8 +213,15 @@ class AudioRecorder:
         with wave.open(str(path), "wb") as wf:
             wf.setnchannels(self.channels)
             wf.setsampwidth(2)
-            wf.setframerate(int(round(self._active_sample_rate)))
+            wf.setframerate(int(round(sample_rate)))
             wf.writeframes(pcm.tobytes())
 
-        self._chunks.clear()
+        return path, duration_s, rms
+
+    def stop_and_dump_wav(self) -> Path:
+        """Convenience: detach + close + dump in one blocking call."""
+        stream, chunks, sample_rate = self.stop_and_detach()
+        path, duration_s, rms = self.close_and_dump_wav(stream, chunks, sample_rate)
+        self._last_duration_s = duration_s
+        self._last_rms = rms
         return path

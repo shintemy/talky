@@ -72,22 +72,24 @@ def test_hotkey_press_runs_recorder_start_on_main_thread(monkeypatch: pytest.Mon
     assert controller._is_recording is True
 
 
-def test_hotkey_release_runs_recorder_stop_on_main_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hotkey_release_detach_runs_on_main_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    """stop_and_detach (non-blocking) must run on the main Qt thread."""
     controller = _build_controller()
     seen: dict[str, QThread] = {}
     controller._is_recording = True
 
-    tmp = NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp_path = Path(tmp.name)
-    tmp.close()
+    fake_stream = SimpleNamespace(stop=lambda: None, close=lambda: None)
 
-    def fake_stop_and_dump_wav() -> Path:
+    def fake_stop_and_detach():
         seen["thread"] = QThread.currentThread()
-        controller.recorder._last_duration_s = 0.0
-        controller.recorder._last_rms = 0.0
-        return tmp_path
+        return fake_stream, [], 16000.0
 
-    monkeypatch.setattr(controller.recorder, "stop_and_dump_wav", fake_stop_and_dump_wav)
+    monkeypatch.setattr(controller.recorder, "stop_and_detach", fake_stop_and_detach)
+    monkeypatch.setattr(
+        controller.recorder,
+        "close_and_dump_wav",
+        lambda *a, **kw: (Path("/dev/null"), 0.0, 0.0),
+    )
 
     worker = threading.Thread(target=controller._on_hotkey_released)
     worker.start()
