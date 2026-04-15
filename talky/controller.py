@@ -654,7 +654,14 @@ class AppController(QObject):
 
             selected_text_snapshot = ""
             if has_focus:
-                selected_text_snapshot = self.paster.capture_selected_text()
+                try:
+                    selected_text_snapshot = run_with_timeout(
+                        self.paster.capture_selected_text,
+                        3.0,
+                        label="capture_selected_text",
+                    )
+                except Exception:
+                    selected_text_snapshot = ""
 
             if generation != self._processing_generation:
                 return
