@@ -4,6 +4,7 @@ import array
 import importlib
 import math
 import sys
+import time
 import types
 import wave
 
@@ -197,3 +198,27 @@ def test_stop_records_last_duration_and_rms(monkeypatch: pytest.MonkeyPatch) -> 
         assert wf.getsampwidth() == 2
 
     wav_path.unlink(missing_ok=True)
+
+
+def test_safe_close_stream_does_not_block_on_hung_abort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorder_module = _load_recorder_module(monkeypatch)
+    recorder = recorder_module.AudioRecorder()
+
+    class _HungStream:
+        def abort(self) -> None:
+            time.sleep(1.0)
+
+        def stop(self) -> None:
+            return
+
+        def close(self) -> None:
+            return
+
+    stream = _HungStream()
+    started = time.monotonic()
+    recorder._safe_close_stream(stream)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.8

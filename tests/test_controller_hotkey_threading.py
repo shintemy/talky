@@ -13,6 +13,7 @@ pytest.importorskip("PyQt6")
 from PyQt6.QtCore import QThread
 from PyQt6.QtWidgets import QApplication
 
+import talky.controller as controller_module
 from talky.controller import AppController
 from talky.focus import FrontAppInfo
 from talky.models import AppSettings
@@ -177,3 +178,46 @@ def test_should_paste_after_refocus_from_transient_front_app(
     assert controller._should_paste_to_focus_target(
         FrontAppInfo(name="TextInputMenuAgent", pid=777)
     )
+
+
+def test_cancel_processing_resets_timeout_budget() -> None:
+    controller = _build_controller()
+    controller._is_processing = True
+    controller._processing_started_ts = 123.0
+    controller._processing_timeout_s = 215.0
+
+    controller._cancel_processing("unit_test")
+
+    assert controller._is_processing is False
+    assert controller._processing_started_ts == 0.0
+    assert controller._processing_timeout_s == controller_module._PROCESSING_TIMEOUT_S
+
+
+def test_process_pipeline_applies_timeout_to_audio_finalize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller._processing_generation = 7
+    controller._is_processing = True
+    labels: list[str] = []
+
+    def fake_run_with_timeout(func, timeout_s: float, *, label: str):  # noqa: ANN001
+        del timeout_s
+        labels.append(label)
+        return func()
+
+    monkeypatch.setattr("talky.controller.run_with_timeout", fake_run_with_timeout)
+
+    with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        wav_path = Path(tmp.name)
+
+    monkeypatch.setattr(
+        controller.recorder,
+        "close_and_dump_wav",
+        lambda *_args, **_kwargs: (wav_path, 1.2, 0.01),
+    )
+    monkeypatch.setattr(controller, "_process_local", lambda *_args, **_kwargs: "")
+
+    controller._process_pipeline((object(), [], 16000.0), generation=7, has_focus=False)
+
+    assert "audio finalize step" in labels

@@ -6,8 +6,8 @@ from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-CURRENT_VERSION = "Talky-v0.5.6-alpha-unsigned"
-CURRENT_BUILD_ID = "pTTiT5"
+CURRENT_VERSION = "Talky-2026.04.30-0b49571-unsigned"
+CURRENT_BUILD_ID = "gXwzN4"
 
 
 class VersionChecker(QObject):

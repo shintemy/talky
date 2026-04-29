@@ -3,11 +3,14 @@ from __future__ import annotations
 import array
 import math
 import tempfile
+import threading
 import time
 import wave
 from pathlib import Path
 
 import sounddevice as sd
+
+_STREAM_OP_TIMEOUT_S = 0.35
 
 
 class AudioRecorder:
@@ -130,17 +133,32 @@ class AudioRecorder:
     def _safe_close_stream(self, stream) -> None:
         if stream is None:
             return
-        try:
-            stream.abort()
-        except Exception:
+        abort = getattr(stream, "abort", None)
+        stop = getattr(stream, "stop", None)
+        close = getattr(stream, "close", None)
+
+        aborted = False
+        if callable(abort):
+            aborted = self._run_stream_op_with_timeout(abort)
+        if not aborted and callable(stop):
+            self._run_stream_op_with_timeout(stop)
+        if callable(close):
+            self._run_stream_op_with_timeout(close)
+
+    def _run_stream_op_with_timeout(self, op, timeout_s: float = _STREAM_OP_TIMEOUT_S) -> bool:
+        done = threading.Event()
+
+        def _runner() -> None:
             try:
-                stream.stop()
+                op()
             except Exception:
                 pass
-        try:
-            stream.close()
-        except Exception:
-            pass
+            finally:
+                done.set()
+
+        worker = threading.Thread(target=_runner, daemon=True)
+        worker.start()
+        return done.wait(timeout_s)
 
     def _reset_portaudio(self) -> None:
         terminate = getattr(sd, "_terminate", None)

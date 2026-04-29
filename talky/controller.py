@@ -59,6 +59,7 @@ _PROCESSING_WATCHDOG_INTERVAL_MS = 1000
 _PROCESSING_TIMEOUT_S = 45.0
 _ASR_STEP_TIMEOUT_S = 35.0
 _LLM_STEP_TIMEOUT_S = 25.0
+_AUDIO_FINALIZE_TIMEOUT_S = 8.0
 _TRANSIENT_FRONT_APPS = {
     "finder",
     "dock",
@@ -473,6 +474,11 @@ class AppController(QObject):
         try:
             detached = self.recorder.stop_and_detach()
             self._is_recording = False
+            stream, chunks, sample_rate = detached
+            append_debug_log(
+                "record stop detached: "
+                f"chunks={len(chunks)}; sample_rate={sample_rate:.1f}"
+            )
 
             front_app = get_frontmost_app()
             self._remember_target_front_app(front_app)
@@ -480,11 +486,18 @@ class AppController(QObject):
             if front_app is not None and has_focus:
                 self._last_focus_target_pid = front_app.pid
 
-            self._emit_pipeline_state("processing", source="record_released")
             self._is_processing = True
             self._processing_started_ts = time.monotonic()
+            self._processing_timeout_s = _PROCESSING_TIMEOUT_S
+            if self._processing_watchdog_timer is None or not self._processing_watchdog_timer.isActive():
+                self._start_processing_watchdog()
             self._processing_generation += 1
             generation = self._processing_generation
+            self._emit_pipeline_state("processing", source="record_released")
+            append_debug_log(
+                "processing armed: "
+                f"generation={generation}; timeout={self._processing_timeout_s:.1f}s"
+            )
 
             worker = threading.Thread(
                 target=self._process_pipeline,
@@ -494,6 +507,9 @@ class AppController(QObject):
             worker.start()
         except Exception as exc:
             self._is_recording = False
+            self._is_processing = False
+            self._processing_started_ts = 0.0
+            self._processing_timeout_s = _PROCESSING_TIMEOUT_S
             self._emit_pipeline_state("idle", source="record_stop_error")
             self.error_signal.emit(f"Failed to stop recording: {exc}")
         finally:
@@ -504,6 +520,7 @@ class AppController(QObject):
         self._processing_generation += 1
         self._is_processing = False
         self._processing_started_ts = 0.0
+        self._processing_timeout_s = _PROCESSING_TIMEOUT_S
         append_debug_log(f"processing cancelled: source={source}")
         self._emit_pipeline_state("idle", source=source)
         wav_path = self._processing_wav_path
@@ -620,12 +637,27 @@ class AppController(QObject):
         stream, chunks, sample_rate = detached
         wav_path: Path | None = None
         try:
+            append_debug_log(
+                "pipeline worker begin: "
+                f"generation={generation}; chunks={len(chunks)}; sample_rate={sample_rate:.1f}; "
+                f"has_focus={has_focus}"
+            )
             if generation != self._processing_generation:
                 self.recorder._safe_close_stream(stream)
                 return
 
-            wav_path, duration_s, rms = self.recorder.close_and_dump_wav(
-                stream, chunks, sample_rate,
+            wav_path, duration_s, rms = run_with_timeout(
+                lambda: self.recorder.close_and_dump_wav(
+                    stream,
+                    chunks,
+                    sample_rate,
+                ),
+                _AUDIO_FINALIZE_TIMEOUT_S,
+                label="audio finalize step",
+            )
+            append_debug_log(
+                "audio finalize done: "
+                f"duration={duration_s:.2f}s; rms={rms:.5f}"
             )
 
             if duration_s < _MIN_RECORD_DURATION_S:
