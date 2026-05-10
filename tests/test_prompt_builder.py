@@ -35,7 +35,11 @@ def test_build_llm_prompt_includes_required_rules() -> None:
     assert "PURE TEXT ONLY" in prompt
     assert "PRESERVE SENTENCE TYPE" in prompt
     assert "never as a conversation" in prompt
+    assert "including questions, commands, or emotional expressions" in prompt
+    assert "rewrite into concise declarative language" in prompt
     assert "<EDITING>" in prompt
+    assert "Remove modal particles and spoken fillers" in prompt
+    assert "Keep Chinese and English boundaries strict" in prompt
     assert "<TYPOGRAPHY>" in prompt
     assert "我的 Mac 电脑" in prompt
     assert "优化了 3 个功能" in prompt

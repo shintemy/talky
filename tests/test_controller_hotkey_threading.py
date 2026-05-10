@@ -131,6 +131,44 @@ def test_wake_guard_rebuilds_when_hotkey_health_check_fails(
     assert events and "health check failed" in events[-1]
 
 
+def test_wake_guard_recovers_stale_recording_after_sleep_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller._is_recording = True
+    controller._is_processing = False
+    controller._last_wake_guard_tick_ts = time.monotonic() - 60.0
+    controller.settings.wake_guard_gap_threshold_s = 20.0
+    events: list[str] = []
+    rebuilds: list[str] = []
+    telemetry: list[float] = []
+    closed_streams: list[object] = []
+    fake_stream = object()
+
+    monkeypatch.setattr(
+        controller.recorder,
+        "stop_and_detach",
+        lambda: (fake_stream, [], 16000.0),
+    )
+    monkeypatch.setattr(
+        controller.recorder,
+        "_safe_close_stream",
+        lambda stream: closed_streams.append(stream),
+    )
+    monkeypatch.setattr(controller.status_signal, "emit", lambda msg: events.append(msg))
+    monkeypatch.setattr(controller, "_start_hotkey", lambda: rebuilds.append("rebuilt"))
+    monkeypatch.setattr(controller, "_record_wake_guard_rebuild", lambda now: telemetry.append(now))
+
+    controller._on_wake_guard_tick()
+
+    assert controller._is_recording is False
+    assert controller._last_pipeline_state == "idle"
+    assert closed_streams == [fake_stream]
+    assert rebuilds == ["rebuilt"]
+    assert len(telemetry) == 1
+    assert events and "stale recording" in events[-1]
+
+
 def test_update_custom_llm_prompt_persists_without_service_rebuild() -> None:
     controller = _build_controller()
     rebuild_calls: list[str] = []
@@ -221,3 +259,44 @@ def test_process_pipeline_applies_timeout_to_audio_finalize(
     controller._process_pipeline((object(), [], 16000.0), generation=7, has_focus=False)
 
     assert "audio finalize step" in labels
+
+
+def test_process_pipeline_stores_raw_text_but_pastes_final_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller._processing_generation = 9
+    controller._is_processing = True
+    history_entries: list[tuple[str, str]] = []
+    pasted: list[str] = []
+
+    with NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        wav_path = Path(tmp.name)
+
+    monkeypatch.setattr(
+        controller.recorder,
+        "close_and_dump_wav",
+        lambda *_args, **_kwargs: (wav_path, 1.2, 0.01),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_process_local",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            final_text="LLM 最终输出",
+            raw_text="Whisper 原文",
+        ),
+    )
+    monkeypatch.setattr(controller, "_should_paste_to_focus_target", lambda _app: True)
+    monkeypatch.setattr("talky.controller.get_frontmost_app", lambda: None)
+    monkeypatch.setattr(
+        controller.history_store,
+        "append",
+        lambda text, raw_text="", **_kwargs: history_entries.append((text, raw_text))
+        or Path("/tmp/history.md"),
+    )
+    monkeypatch.setattr(controller.paste_to_front_signal, "emit", lambda text: pasted.append(text))
+
+    controller._process_pipeline((object(), [], 16000.0), generation=9, has_focus=False)
+
+    assert history_entries == [("LLM 最终输出", "Whisper 原文")]
+    assert pasted == ["LLM 最终输出"]

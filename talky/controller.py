@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
 import threading
 import time
@@ -42,6 +43,7 @@ from talky.text_guard import (
 )
 from talky.wake_guard import (
     normalize_wake_guard_threshold,
+    should_recover_stale_recording_after_wake,
     should_mark_suspected_false_positive,
     should_rebuild_hotkey,
 )
@@ -69,6 +71,12 @@ _TRANSIENT_FRONT_APPS = {
     "controlcenter",
     "notificationcenter",
 }
+
+
+@dataclass(frozen=True)
+class ProcessingResult:
+    final_text: str
+    raw_text: str = ""
 
 
 def normalize_to_simplified_chinese(text: str) -> str:
@@ -369,12 +377,21 @@ class AppController(QObject):
         hotkey_healthy = bool(self.hotkey and self.hotkey.ensure_active())
         if not rebuild_due_to_gap and hotkey_healthy:
             return
+        recovered_stale_recording = False
+        if should_recover_stale_recording_after_wake(
+            elapsed_seconds=elapsed,
+            threshold_seconds=threshold,
+            is_recording=self._is_recording,
+        ):
+            recovered_stale_recording = self._recover_stale_recording_after_wake()
         if self._is_recording or self._is_processing:
             return
         # System sleep/wake often invalidates global key taps; proactively rebuild.
         self._start_hotkey()
         self._record_wake_guard_rebuild(now)
-        if rebuild_due_to_gap:
+        if recovered_stale_recording:
+            reason = "System wake detected; stale recording discarded."
+        elif rebuild_due_to_gap:
             reason = "System wake detected."
         else:
             reason = "Hotkey listener health check failed."
@@ -383,6 +400,23 @@ class AppController(QObject):
             f"Wake-guard telemetry: {self.settings.wake_guard_suspected_false_positive_count}/"
             f"{self.settings.wake_guard_rebuild_count} suspected false-positive."
         )
+
+    def _recover_stale_recording_after_wake(self) -> bool:
+        append_debug_log("wake guard recovering stale recording after sleep/wake gap")
+        try:
+            stream, _chunks, _sample_rate = self.recorder.stop_and_detach()
+        except Exception as exc:
+            append_debug_log("wake guard failed to detach stale recording", exc=exc)
+            self._is_recording = False
+            self._emit_pipeline_state("idle", source="wake_guard_recording_recover_error")
+            return False
+        try:
+            self.recorder._safe_close_stream(stream)
+        except Exception as exc:
+            append_debug_log("wake guard failed to close stale recording stream", exc=exc)
+        self._is_recording = False
+        self._emit_pipeline_state("idle", source="wake_guard_stale_recording")
+        return True
 
     def _start_processing_watchdog(self) -> None:
         if self._processing_watchdog_timer is not None:
@@ -553,7 +587,7 @@ class AppController(QObject):
         *,
         asr_timeout_s: float,
         selected_text_snapshot: str = "",
-    ) -> str:
+    ) -> ProcessingResult:
         ok, error = check_ollama_reachable()
         if not ok:
             host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -587,7 +621,7 @@ class AppController(QObject):
             raise RuntimeError("ASR returned empty text. Please retry.")
         corrected_raw_text = apply_phonetic_dictionary(raw_text, dict_terms)
         if len(corrected_raw_text.replace(" ", "").strip()) < 2:
-            return ""
+            return ProcessingResult(final_text="", raw_text=raw_text)
 
         if selected_text_snapshot and looks_like_edit_instruction(corrected_raw_text):
             rewritten_text = run_with_timeout(
@@ -603,7 +637,7 @@ class AppController(QObject):
             rewritten_text = normalize_person_pronouns(rewritten_text, person_terms)
             rewritten_text = collapse_duplicate_output(rewritten_text)
             rewritten_text = normalize_to_simplified_chinese(rewritten_text)
-            return rewritten_text
+            return ProcessingResult(final_text=rewritten_text)
 
         llm_start = time.perf_counter()
         final_text = run_with_timeout(
@@ -626,7 +660,7 @@ class AppController(QObject):
             final_text = enforce_source_boundaries(corrected_raw_text, final_text)
             final_text = normalize_to_simplified_chinese(final_text)
         final_text = collapse_duplicate_output(final_text)
-        return final_text
+        return ProcessingResult(final_text=final_text, raw_text=raw_text)
 
     def _process_pipeline(
         self,
@@ -698,13 +732,15 @@ class AppController(QObject):
             if generation != self._processing_generation:
                 return
             if self.is_cloud_mode:
-                final_text = self._process_cloud(wav_path)
+                result = ProcessingResult(final_text=self._process_cloud(wav_path))
             else:
-                final_text = self._process_local(
+                result = self._process_local(
                     wav_path,
                     asr_timeout_s=asr_timeout_s,
                     selected_text_snapshot=selected_text_snapshot,
                 )
+            final_text = result.final_text
+            raw_text = result.raw_text
             if generation != self._processing_generation:
                 return
             if not final_text:
@@ -717,7 +753,7 @@ class AppController(QObject):
             self._last_output_ts = now
 
             print(f"[Talky] Final text: {final_text}")
-            history_path = self.history_store.append(final_text)
+            history_path = self.history_store.append(final_text, raw_text=raw_text)
             print(f"[Talky] History appended: {history_path}")
 
             current_front_app = get_frontmost_app()

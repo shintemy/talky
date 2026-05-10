@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from talky.wake_guard import (
     normalize_wake_guard_threshold,
+    should_recover_stale_recording_after_wake,
     should_mark_suspected_false_positive,
     should_rebuild_hotkey,
 )
@@ -17,6 +18,24 @@ def test_wake_guard_rebuilds_for_sleep_wake_gap() -> None:
     # Simulate a sleep/wake gap where timer ticks are delayed.
     assert should_rebuild_hotkey(20.0, 20.0)
     assert should_rebuild_hotkey(47.5, 20.0)
+
+
+def test_wake_guard_recovers_stale_recording_after_sleep_wake_gap() -> None:
+    assert should_recover_stale_recording_after_wake(
+        elapsed_seconds=47.5,
+        threshold_seconds=20.0,
+        is_recording=True,
+    )
+    assert not should_recover_stale_recording_after_wake(
+        elapsed_seconds=3.0,
+        threshold_seconds=20.0,
+        is_recording=True,
+    )
+    assert not should_recover_stale_recording_after_wake(
+        elapsed_seconds=47.5,
+        threshold_seconds=20.0,
+        is_recording=False,
+    )
 
 
 def test_wake_guard_handles_repeated_sleep_wake_cycles() -> None:

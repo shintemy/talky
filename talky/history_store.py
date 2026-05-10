@@ -32,11 +32,20 @@ class HistoryStore:
                     continue
         return migrated
 
-    def append(self, text: str, now: datetime | None = None) -> Path:
+    def append(
+        self,
+        text: str,
+        now: datetime | None = None,
+        raw_text: str = "",
+    ) -> Path:
         timestamp = now or datetime.now()
         self.history_dir.mkdir(parents=True, exist_ok=True)
         file_path = self.history_dir / f"{timestamp:%Y-%m-%d}.md"
-        entry = self._format_entry(text=text, timestamp=timestamp)
+        entry = self._format_entry(
+            text=text,
+            timestamp=timestamp,
+            raw_text=raw_text,
+        )
         with file_path.open("a", encoding="utf-8") as f:
             f.write(entry)
         return file_path
@@ -68,6 +77,9 @@ class HistoryStore:
         entries.reverse()
         return entries
 
-    def _format_entry(self, text: str, timestamp: datetime) -> str:
+    def _format_entry(self, text: str, timestamp: datetime, raw_text: str = "") -> str:
         safe_text = text.strip()
+        safe_raw_text = raw_text.strip()
+        if safe_raw_text:
+            safe_text = f"最终输出\n\n{safe_text}\n\n原文\n\n{safe_raw_text}"
         return f"## {timestamp:%H:%M:%S}\n\n{safe_text}\n\n"

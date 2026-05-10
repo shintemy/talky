@@ -10,6 +10,15 @@ def should_rebuild_hotkey(elapsed_seconds: float, threshold_seconds: float) -> b
     return elapsed_seconds >= threshold_seconds
 
 
+def should_recover_stale_recording_after_wake(
+    *,
+    elapsed_seconds: float,
+    threshold_seconds: float,
+    is_recording: bool,
+) -> bool:
+    return is_recording and should_rebuild_hotkey(elapsed_seconds, threshold_seconds)
+
+
 def normalize_wake_guard_threshold(value: float | int | str | None) -> float:
     try:
         threshold = float(value)

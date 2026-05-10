@@ -68,6 +68,7 @@ class OllamaTextCleaner:
         usage_mode: str = "daily",
         custom_vibe_template: str = "",
     ) -> str:
+        max_predict = 260 if usage_mode == "vibecoding" else 200
         system_prompt = build_llm_system_prompt(
             dictionary_terms,
             custom_template=custom_prompt_template,
@@ -83,7 +84,7 @@ class OllamaTextCleaner:
             stream=True,
             options={
                 "temperature": 0,
-                "num_predict": 300,
+                "num_predict": max_predict,
                 "top_p": 0.1,
             },
         )

@@ -169,6 +169,23 @@ def test_clean_never_returns_thinking_fallback() -> None:
     assert result == "你来操作"
 
 
+def test_clean_sets_num_predict_by_usage_mode() -> None:
+    captured_calls = []
+
+    def chat_impl(**kwargs):  # noqa: ANN003
+        captured_calls.append(kwargs)
+        return [{"message": {"content": "ok", "thinking": ""}}]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+
+    cleaner.clean(raw_text="原始文本", dictionary_terms=[], usage_mode="daily")
+    cleaner.clean(raw_text="原始文本", dictionary_terms=[], usage_mode="vibecoding")
+
+    assert captured_calls[0]["options"]["num_predict"] == 200
+    assert captured_calls[1]["options"]["num_predict"] == 260
+
+
 def test_warm_up_uses_short_chat_request() -> None:
     captured = {}
 

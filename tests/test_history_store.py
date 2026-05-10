@@ -47,3 +47,29 @@ def test_history_store_creates_daily_file_and_appends_entries(tmp_path: Path) ->
     assert "First line" in content
     assert "## 11:11:12" in content
     assert "Second line" in content
+
+
+def test_history_store_appends_final_output_and_raw_text(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    store = HistoryStore(history_dir=history_dir)
+    day = datetime(2026, 5, 10, 18, 30, 0)
+
+    created_path = store.append(
+        "整理后的最终文本",
+        raw_text="Whisper 原始识别文本",
+        now=day,
+    )
+
+    content = created_path.read_text(encoding="utf-8")
+    assert "最终输出" in content
+    assert "整理后的最终文本" in content
+    assert "原文" in content
+    assert "Whisper 原始识别文本" in content
+
+    entries = store.read_entries("2026-05-10")
+    assert entries == [
+        (
+            "18:30:00",
+            "最终输出\n\n整理后的最终文本\n\n原文\n\nWhisper 原始识别文本",
+        )
+    ]
