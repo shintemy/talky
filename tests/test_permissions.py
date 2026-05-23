@@ -124,3 +124,31 @@ def test_request_microphone_permission_requests_when_not_determined(
 
     assert ok is True
     assert error == ""
+
+
+def test_check_input_monitoring_granted_uses_quartz_preflight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    permissions = importlib.import_module("talky.permissions")
+
+    fake_quartz = types.SimpleNamespace(CGPreflightListenEventAccess=lambda: True)
+    monkeypatch.setitem(sys.modules, "Quartz", fake_quartz)
+
+    assert permissions.check_input_monitoring_granted() is True
+
+
+def test_request_input_monitoring_permission_calls_system_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    permissions = importlib.import_module("talky.permissions")
+    called = {"request": 0}
+
+    fake_quartz = types.SimpleNamespace(
+        CGPreflightListenEventAccess=lambda: False,
+        CGRequestListenEventAccess=lambda: called.__setitem__("request", called["request"] + 1)
+        or True,
+    )
+    monkeypatch.setitem(sys.modules, "Quartz", fake_quartz)
+
+    assert permissions.request_input_monitoring_permission() is True
+    assert called["request"] == 1

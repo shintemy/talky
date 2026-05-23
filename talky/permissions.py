@@ -20,6 +20,35 @@ def is_accessibility_trusted(prompt: bool = False) -> bool:
         return False
 
 
+def check_input_monitoring_granted() -> bool:
+    """Check macOS Input Monitoring (event tap) permission."""
+    try:
+        import Quartz
+
+        preflight = getattr(Quartz, "CGPreflightListenEventAccess", None)
+        if callable(preflight):
+            return bool(preflight())
+        # Older macOS / bindings may not expose this API; do not hard-block.
+        return True
+    except Exception:
+        return False
+
+
+def request_input_monitoring_permission() -> bool:
+    """Request macOS Input Monitoring permission when missing."""
+    if check_input_monitoring_granted():
+        return True
+    try:
+        import Quartz
+
+        request = getattr(Quartz, "CGRequestListenEventAccess", None)
+        if callable(request):
+            return bool(request())
+    except Exception:
+        return False
+    return False
+
+
 def is_ollama_installed() -> bool:
     if shutil.which("ollama") is not None:
         return True

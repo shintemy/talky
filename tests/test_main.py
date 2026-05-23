@@ -154,3 +154,46 @@ def test_duplicate_launch_does_not_notify_show_settings(monkeypatch) -> None:
 
     assert main_module.main() == 0
     assert called["notify"] == 0
+
+
+def test_input_monitoring_refresh_waits_for_real_permission(monkeypatch) -> None:
+    scheduled: list[tuple[int, object]] = []
+
+    class FakeQTimer:
+        @staticmethod
+        def singleShot(delay_ms: int, callback) -> None:
+            scheduled.append((delay_ms, callback))
+
+    fake_qtwidgets = SimpleNamespace(QApplication=type("FakeQApplication", (), {}))
+    fake_qtcore = SimpleNamespace(QTimer=FakeQTimer)
+    fake_pyqt6 = SimpleNamespace(QtWidgets=fake_qtwidgets, QtCore=fake_qtcore)
+    monkeypatch.setitem(sys.modules, "PyQt6", fake_pyqt6)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", fake_qtwidgets)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtCore", fake_qtcore)
+    sys.modules.pop("main", None)
+    main_module = importlib.import_module("main")
+
+    granted_states = [False, False, True]
+    requests: list[str] = []
+    refresh_calls: list[str] = []
+
+    monkeypatch.setattr(
+        main_module,
+        "check_input_monitoring_granted",
+        lambda: granted_states.pop(0) if granted_states else True,
+    )
+    monkeypatch.setattr(
+        main_module,
+        "request_input_monitoring_permission",
+        lambda: requests.append("requested"),
+    )
+
+    controller = SimpleNamespace(refresh_hotkey_listener=lambda: refresh_calls.append("refresh"))
+    main_module._request_input_monitoring_permission_after_start(controller)
+
+    while scheduled and not refresh_calls:
+        _delay, cb = scheduled.pop(0)
+        cb()
+
+    assert requests == ["requested"]
+    assert refresh_calls == ["refresh"]

@@ -24,6 +24,10 @@ from talky.preflight import OllamaStatus, detect_system_locale, run_preflight_ch
 from talky.remote_service import verify_cloud_server
 
 
+def _usage_mode_requires_llm(usage_mode: str) -> bool:
+    return usage_mode in {"vibecoding", "translation"}
+
+
 def apply_ollama_host_from_settings(settings: AppSettings) -> None:
     host = (settings.ollama_host or "http://127.0.0.1:11434").strip().rstrip("/")
     if not host:
@@ -127,6 +131,8 @@ def alert_if_local_ollama_unready(config_store: AppConfigStore) -> bool:
     settings = config_store.load()
     if settings.mode not in {"local", "remote"}:
         return False
+    if not _usage_mode_requires_llm(settings.usage_mode):
+        return False
 
     apply_ollama_host_from_settings(settings)
 
@@ -195,6 +201,8 @@ def ensure_local_ollama_ready(config_store: AppConfigStore) -> bool:
     from talky.onboarding import OnboardingWizard, show_returning_user_prompt
 
     settings = config_store.load()
+    if not _usage_mode_requires_llm(settings.usage_mode):
+        return True
     apply_ollama_host_from_settings(settings)
     status = run_preflight_check(required_model=settings.ollama_model)
     if status == OllamaStatus.READY:

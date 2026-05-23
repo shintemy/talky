@@ -67,13 +67,17 @@ class OllamaTextCleaner:
         custom_prompt_template: str = "",
         usage_mode: str = "daily",
         custom_vibe_template: str = "",
+        translation_input_language: str = "zh",
+        translation_output_language: str = "en",
     ) -> str:
-        max_predict = 260 if usage_mode == "vibecoding" else 200
+        max_predict = 260 if usage_mode in {"vibecoding", "translation"} else 200
         system_prompt = build_llm_system_prompt(
             dictionary_terms,
             custom_template=custom_prompt_template,
             usage_mode=usage_mode,
             custom_vibe_template=custom_vibe_template,
+            translation_input_language=translation_input_language,
+            translation_output_language=translation_output_language,
         )
         stream = self._chat_with_fallback(
             messages=[

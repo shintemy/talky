@@ -222,6 +222,20 @@ def test_build_llm_prompt_vibecoding_empty_vibe_uses_default_template() -> None:
     assert "STRICT LANGUAGE MATCH" not in prompt
 
 
+def test_build_llm_prompt_translation_uses_language_pair() -> None:
+    prompt = build_llm_system_prompt(
+        ["K8s"],
+        usage_mode="translation",
+        translation_input_language="zh",
+        translation_output_language="de",
+    )
+
+    assert "translation" in prompt.lower()
+    assert "Chinese" in prompt
+    assert "German" in prompt
+    assert "K8s" in prompt
+
+
 # ---------------------------------------------------------------------------
 # Selection rewrite (unaffected by usage_mode)
 # ---------------------------------------------------------------------------

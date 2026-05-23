@@ -58,6 +58,7 @@ _MIN_RECORD_RMS = 0.003
 _HOTKEY_COOLDOWN_S = 0.45
 _WAKE_GUARD_INTERVAL_MS = 5000
 _PROCESSING_WATCHDOG_INTERVAL_MS = 1000
+_RECORD_RELEASE_GUARD_INTERVAL_MS = 250
 _PROCESSING_TIMEOUT_S = 45.0
 _ASR_STEP_TIMEOUT_S = 35.0
 _LLM_STEP_TIMEOUT_S = 25.0
@@ -151,6 +152,7 @@ class AppController(QObject):
         self._last_wake_guard_rebuild_ts = 0.0
         self._last_pipeline_state = "idle"
         self._processing_watchdog_timer: QTimer | None = None
+        self._record_release_guard_timer: QTimer | None = None
         self._processing_started_ts = 0.0
         self._processing_timeout_s = _PROCESSING_TIMEOUT_S
         self._processing_generation = 0
@@ -178,13 +180,21 @@ class AppController(QObject):
         self._start_hotkey()
         self._start_wake_guard()
         self._start_processing_watchdog()
+        self._start_record_release_guard()
         self._emit_pipeline_state("idle", source="start")
         self._warm_up_models_async()
 
     def request_show_settings(self) -> None:
         self.show_settings_window_signal.emit()
 
+    def refresh_hotkey_listener(self) -> None:
+        """Recreate global hotkey listener after permission state changes."""
+        self._start_hotkey()
+
     def stop(self) -> None:
+        if self._record_release_guard_timer is not None:
+            self._record_release_guard_timer.stop()
+            self._record_release_guard_timer = None
         if self._processing_watchdog_timer is not None:
             self._processing_watchdog_timer.stop()
             self._processing_watchdog_timer = None
@@ -196,14 +206,42 @@ class AppController(QObject):
             self.hotkey = None
 
     def update_settings(self, new_settings: AppSettings) -> None:
+        previous = self.settings
         self.settings = new_settings
         self._apply_ollama_host_env()
         self.config_store.save(new_settings)
-        self._rebuild_services()
-        self._start_hotkey()
-        self._warm_up_models_async()
+        if self._settings_require_service_rebuild(previous, new_settings):
+            self._rebuild_services()
+        if self._hotkey_config_changed(previous, new_settings) or self.hotkey is None:
+            self._start_hotkey()
         self.settings_updated.emit(new_settings)
         self.status_signal.emit("Settings saved.")
+
+    @staticmethod
+    def _hotkey_config_changed(previous: AppSettings, current: AppSettings) -> bool:
+        return (
+            previous.hotkey != current.hotkey
+            or list(previous.custom_hotkey) != list(current.custom_hotkey)
+        )
+
+    @staticmethod
+    def _settings_require_service_rebuild(previous: AppSettings, current: AppSettings) -> bool:
+        # Rebuild runtime services only when their constructor/runtime dependencies changed.
+        keys = (
+            "sample_rate",
+            "channels",
+            "auto_paste_delay_ms",
+            "whisper_model",
+            "language",
+            "ollama_model",
+            "llm_debug_stream",
+            "mode",
+            "cloud_api_url",
+            "cloud_api_key",
+            "ollama_host",
+            "usage_mode",
+        )
+        return any(getattr(previous, key) != getattr(current, key) for key in keys)
 
     def update_dictionary(self, lines: list[str]) -> None:
         """Update just the dictionary portion of settings."""
@@ -234,6 +272,8 @@ class AppController(QObject):
             self.settings_updated.emit(self.settings)
 
     def _build_cloud_service(self) -> CloudProcessService | None:
+        if not self._usage_mode_requires_llm(self.settings.usage_mode):
+            return None
         if (
             self.settings.mode == "cloud"
             and self.settings.cloud_api_url
@@ -247,7 +287,11 @@ class AppController(QObject):
 
     @property
     def is_cloud_mode(self) -> bool:
-        return self.settings.mode == "cloud" and self.cloud_service is not None
+        return (
+            self._usage_mode_requires_llm(self.settings.usage_mode)
+            and self.settings.mode == "cloud"
+            and self.cloud_service is not None
+        )
 
     def _rebuild_services(self) -> None:
         self._apply_ollama_host_env()
@@ -332,6 +376,10 @@ class AppController(QObject):
         hostname = (parsed.hostname or "").lower()
         return hostname in {"127.0.0.1", "localhost", "::1"}
 
+    @staticmethod
+    def _usage_mode_requires_llm(usage_mode: str) -> bool:
+        return usage_mode in {"vibecoding", "translation"}
+
     def _start_hotkey(self) -> None:
         if self.hotkey:
             self.hotkey.stop()
@@ -342,6 +390,10 @@ class AppController(QObject):
             on_release=self._on_hotkey_released,
         )
         self.hotkey.start()
+        append_debug_log(
+            "hotkey listener started: "
+            f"configured={self.settings.hotkey}; fallback={self.hotkey.using_fallback}"
+        )
         QTimer.singleShot(350, self._notify_hotkey_status_after_start)
         self._last_wake_guard_tick_ts = time.monotonic()
 
@@ -427,6 +479,30 @@ class AppController(QObject):
         timer.start()
         self._processing_watchdog_timer = timer
 
+    def _start_record_release_guard(self) -> None:
+        if self._record_release_guard_timer is not None:
+            self._record_release_guard_timer.stop()
+        timer = QTimer(self)
+        timer.setInterval(_RECORD_RELEASE_GUARD_INTERVAL_MS)
+        timer.timeout.connect(self._on_record_release_guard_tick)
+        timer.start()
+        self._record_release_guard_timer = timer
+
+    def _on_record_release_guard_tick(self) -> None:
+        if not self._is_recording:
+            return
+        hotkey = self.hotkey
+        if hotkey is None:
+            return
+        try:
+            pressed_now = hotkey.is_pressed_now()
+        except Exception:
+            return
+        if pressed_now:
+            return
+        append_debug_log("record release guard: synthesized release after missed hotkey event")
+        self._handle_hotkey_released_main_thread()
+
     def _on_processing_watchdog_tick(self) -> None:
         if not self._is_processing or self._processing_started_ts <= 0:
             return
@@ -448,13 +524,13 @@ class AppController(QObject):
             return
         if not hotkey.using_fallback:
             return
-        if self.settings.hotkey == "fn":
-            self.settings.hotkey = "right_option"
-            self.config_store.save(self.settings)
-            self.settings_updated.emit(self.settings)
+        append_debug_log(
+            "hotkey fallback active: "
+            f"configured={self.settings.hotkey}; runtime_fallback=right_option"
+        )
         self.status_signal.emit(
             "Fn hook unavailable on this macOS setup. "
-            "Switched to Right Option. Hold Right Option to talk."
+            "Using Right Option as runtime fallback. Hold Right Option to talk."
         )
 
     def _on_hotkey_pressed(self) -> None:
@@ -588,23 +664,6 @@ class AppController(QObject):
         asr_timeout_s: float,
         selected_text_snapshot: str = "",
     ) -> ProcessingResult:
-        ok, error = check_ollama_reachable()
-        if not ok:
-            host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-            if self._is_local_ollama_host(host):
-                guide = (
-                    "\nRun: ollama serve and ensure model exists: "
-                    + self.settings.ollama_model
-                )
-            else:
-                guide = (
-                    "\nCheck remote Ollama host and model on: "
-                    + host
-                    + "\nExpected model: "
-                    + self.settings.ollama_model
-                )
-            raise RuntimeError(error + guide)
-
         dictionary_entries = parse_dictionary_entries(self.settings.custom_dictionary)
         dict_terms = extract_terms(dictionary_entries)
         person_terms = extract_person_terms(dictionary_entries)
@@ -622,6 +681,26 @@ class AppController(QObject):
         corrected_raw_text = apply_phonetic_dictionary(raw_text, dict_terms)
         if len(corrected_raw_text.replace(" ", "").strip()) < 2:
             return ProcessingResult(final_text="", raw_text=raw_text)
+
+        if self.settings.usage_mode == "daily":
+            return ProcessingResult(final_text=raw_text, raw_text=raw_text)
+
+        ok, error = check_ollama_reachable()
+        if not ok:
+            host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+            if self._is_local_ollama_host(host):
+                guide = (
+                    "\nRun: ollama serve and ensure model exists: "
+                    + self.settings.ollama_model
+                )
+            else:
+                guide = (
+                    "\nCheck remote Ollama host and model on: "
+                    + host
+                    + "\nExpected model: "
+                    + self.settings.ollama_model
+                )
+            raise RuntimeError(error + guide)
 
         if selected_text_snapshot and looks_like_edit_instruction(corrected_raw_text):
             rewritten_text = run_with_timeout(
@@ -647,13 +726,17 @@ class AppController(QObject):
                 custom_prompt_template=self.settings.custom_llm_prompt,
                 usage_mode=self.settings.usage_mode,
                 custom_vibe_template=self.settings.custom_vibe_prompt,
+                translation_input_language=self.settings.translation_input_language,
+                translation_output_language=self.settings.translation_output_language,
             ),
             _LLM_STEP_TIMEOUT_S,
             label="LLM step",
         )
         llm_elapsed = time.perf_counter() - llm_start
         print(f"[Talky] LLM elapsed: {llm_elapsed:.2f}s")
-        if self.settings.usage_mode != "vibecoding":
+        if self.settings.usage_mode == "translation":
+            final_text = normalize_to_simplified_chinese(final_text)
+        elif self.settings.usage_mode != "vibecoding":
             final_text = apply_phonetic_dictionary(final_text, dict_terms)
             final_text = normalize_person_pronouns(final_text, person_terms)
             final_text = enforce_pronoun_consistency(corrected_raw_text, final_text)
@@ -824,6 +907,10 @@ class AppController(QObject):
                 print(f"[Talky] Whisper warm-up failed: {exc}")
         else:
             append_debug_log("Whisper warm-up skipped at startup (TALKY_ASR_WARMUP not enabled).")
+
+        if not self._usage_mode_requires_llm(self.settings.usage_mode):
+            append_debug_log("LLM warm-up skipped at startup (usage mode does not need LLM).")
+            return
 
         try:
             warm_llm_start = time.perf_counter()

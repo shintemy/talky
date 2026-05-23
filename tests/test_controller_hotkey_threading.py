@@ -184,6 +184,63 @@ def test_update_custom_llm_prompt_persists_without_service_rebuild() -> None:
     assert updated_settings and updated_settings[-1].custom_llm_prompt == "custom prompt"
 
 
+def test_refresh_hotkey_listener_restarts_hotkey() -> None:
+    controller = _build_controller()
+    calls: list[str] = []
+    controller._start_hotkey = lambda: calls.append("restart")  # type: ignore[method-assign]
+
+    controller.refresh_hotkey_listener()
+
+    assert calls == ["restart"]
+
+
+def test_update_settings_hotkey_only_skips_service_rebuild_and_warmup() -> None:
+    controller = _build_controller()
+    rebuild_calls: list[str] = []
+    warmup_calls: list[str] = []
+    hotkey_restart_calls: list[str] = []
+
+    controller._rebuild_services = lambda: rebuild_calls.append("rebuild")  # type: ignore[method-assign]
+    controller._warm_up_models_async = lambda: warmup_calls.append("warmup")  # type: ignore[method-assign]
+    controller._start_hotkey = lambda: hotkey_restart_calls.append("hotkey")  # type: ignore[method-assign]
+
+    updated = AppSettings(**controller.settings.to_dict())
+    updated.hotkey = "right_option"
+
+    controller.update_settings(updated)
+
+    assert rebuild_calls == []
+    assert warmup_calls == []
+    assert hotkey_restart_calls == ["hotkey"]
+
+
+def test_hotkey_fallback_does_not_persist_override() -> None:
+    controller = _build_controller()
+    controller.settings.hotkey = "fn"
+    controller.hotkey = SimpleNamespace(using_fallback=True)  # type: ignore[assignment]
+    seen: list[AppSettings] = []
+    controller.settings_updated.connect(lambda s: seen.append(s))
+
+    controller._notify_hotkey_status_after_start()
+
+    assert controller.settings.hotkey == "fn"
+    assert seen == []
+
+
+def test_record_release_guard_synthesizes_release_when_key_not_pressed() -> None:
+    controller = _build_controller()
+    controller._is_recording = True
+    calls: list[str] = []
+    controller.hotkey = SimpleNamespace(is_pressed_now=lambda: False)  # type: ignore[assignment]
+    controller._handle_hotkey_released_main_thread = (  # type: ignore[method-assign]
+        lambda: calls.append("released")
+    )
+
+    controller._on_record_release_guard_tick()
+
+    assert calls == ["released"]
+
+
 def test_should_paste_after_refocus_from_talky(monkeypatch: pytest.MonkeyPatch) -> None:
     controller = _build_controller()
     controller._last_target_front_app = FrontAppInfo(name="Safari", pid=321)
@@ -300,3 +357,41 @@ def test_process_pipeline_stores_raw_text_but_pastes_final_text(
 
     assert history_entries == [("LLM 最终输出", "Whisper 原文")]
     assert pasted == ["LLM 最终输出"]
+
+
+def test_process_local_daily_mode_skips_ollama_and_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller.settings.usage_mode = "daily"
+    labels: list[str] = []
+
+    monkeypatch.setattr(
+        "talky.controller.check_ollama_reachable",
+        lambda: pytest.fail("Daily mode should not check Ollama"),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_get_asr",
+        lambda: SimpleNamespace(
+            transcribe=lambda *_args, **_kwargs: "Whisper 原文",
+        ),
+    )
+    monkeypatch.setattr(
+        controller.llm,
+        "clean",
+        lambda **_kwargs: pytest.fail("LLM clean should not run"),
+    )
+
+    def fake_run_with_timeout(func, timeout_s: float, *, label: str):  # noqa: ANN001
+        del timeout_s
+        labels.append(label)
+        return func()
+
+    monkeypatch.setattr("talky.controller.run_with_timeout", fake_run_with_timeout)
+
+    result = controller._process_local(Path("/tmp/input.wav"), asr_timeout_s=3.0)
+
+    assert result.final_text == "Whisper 原文"
+    assert result.raw_text == "Whisper 原文"
+    assert labels == ["ASR step"]

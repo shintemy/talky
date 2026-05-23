@@ -11,8 +11,10 @@ from PyQt6.QtWidgets import QApplication
 
 from talky.macos_ui import activate_foreground_app, install_dock_reopen_handler
 from talky.permissions import (
+    check_input_monitoring_granted,
     check_microphone_granted,
     is_accessibility_trusted,
+    request_input_monitoring_permission,
     request_microphone_permission,
 )
 
@@ -222,6 +224,37 @@ def _request_microphone_permission_after_start() -> None:
     request_microphone_permission()
 
 
+def _request_accessibility_permission_after_start() -> None:
+    if is_accessibility_trusted(prompt=False):
+        return
+    # Only trigger macOS permission sheet to avoid overlapping app-level modal warnings.
+    is_accessibility_trusted(prompt=True)
+
+
+def _request_input_monitoring_permission_after_start(controller) -> None:
+    from PyQt6.QtCore import QTimer
+
+    already_granted = check_input_monitoring_granted()
+    if not already_granted:
+        # System-level prompt for global hotkey/event-tap access.
+        request_input_monitoring_permission()
+
+    def _refresh_after_permission_granted(attempt: int = 0) -> None:
+        # Wait until permission is really granted, then rebuild listener once.
+        if check_input_monitoring_granted():
+            controller.refresh_hotkey_listener()
+            return
+        if attempt >= 30:
+            controller.status_signal.emit(
+                "Input Monitoring not granted yet. "
+                "Please enable Talky in System Settings > Privacy & Security > Input Monitoring."
+            )
+            return
+        QTimer.singleShot(1500, lambda a=attempt + 1: _refresh_after_permission_granted(a))
+
+    _refresh_after_permission_granted()
+
+
 def main() -> int:
     check_result = _run_packaged_import_self_check()
     if check_result is not None:
@@ -230,8 +263,6 @@ def main() -> int:
     if not try_acquire_single_instance_lock():
         print("Talky is already running. Skip duplicate launch.", file=sys.stderr)
         return 0
-
-    from PyQt6.QtWidgets import QMessageBox
 
     from talky.config_store import AppConfigStore
     from talky.controller import AppController
@@ -270,24 +301,18 @@ def main() -> int:
     config_store = AppConfigStore(default_config_path())
     install_exception_report_hooks(settings_supplier=config_store.load)
     settings = config_store.load()
+    usage_mode = settings.usage_mode
 
-    if settings.mode == "cloud":
-        if not ensure_cloud_ready(config_store):
-            return 1
-    else:
-        if not ensure_local_ollama_ready(config_store):
-            return 1
+    if usage_mode in {"vibecoding", "translation"}:
+        if settings.mode == "cloud":
+            if not ensure_cloud_ready(config_store):
+                return 1
+        else:
+            if not ensure_local_ollama_ready(config_store):
+                return 1
 
     if not ensure_whisper_ready(config_store):
         return 1
-
-    if not is_accessibility_trusted(prompt=True):
-        QMessageBox.warning(
-            None,
-            "Talky",
-            "Accessibility permission missing. Auto-paste may fail. "
-            "Grant permission in System Settings.",
-        )
 
     controller = AppController(config_store=config_store)
     settings_window = SettingsWindow(controller=controller)
@@ -335,6 +360,8 @@ def main() -> int:
         s = config_store.load()
         if s.mode == "cloud":
             return
+        if s.usage_mode not in {"vibecoding", "translation"}:
+            return
         apply_ollama_host_from_settings(s)
         if run_preflight_check() == OllamaStatus.READY:
             return
@@ -358,6 +385,12 @@ def main() -> int:
     from PyQt6.QtCore import QTimer
 
     QTimer.singleShot(250, _request_microphone_permission_after_start)
+    QTimer.singleShot(
+        1200,
+        lambda c=controller: _request_input_monitoring_permission_after_start(c),
+    )
+    # Accessibility is mainly for robust auto-paste automation, so ask after hotkey permission.
+    QTimer.singleShot(3000, _request_accessibility_permission_after_start)
     QTimer.singleShot(450, _deferred_local_ollama_recheck)
     return app.exec()
 

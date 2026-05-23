@@ -24,7 +24,6 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
-    QCheckBox,
     QComboBox,
     QDialog,
     QFrame,
@@ -159,6 +158,9 @@ _ZH = {
     "usage_mode": "使用模式",
     "usage_mode_daily": "Daily",
     "usage_mode_vibecoding": "Vibecoding",
+    "usage_mode_translation": "Translation",
+    "translation_input_language": "翻译输入语言",
+    "translation_output_language": "翻译输出语言",
     # Prompt tab
     "prompt": "Prompt",
     "prompt_section_title": "For Daily Usage",
@@ -1600,6 +1602,29 @@ class ConfigsTab(QWidget):
         self.language_combo.addItem("Deutsch", userData="de")
         self.language_combo.addItem("Français", userData="fr")
         self.language_combo.addItem("Español", userData="es")
+        self.language_combo.addItem("Русский", userData="ru")
+        self.language_combo.addItem("العربية", userData="ar")
+
+        self.translation_input_language_combo = StyledComboBox()
+        self.translation_input_language_combo.addItem("中文", userData="zh")
+        self.translation_input_language_combo.addItem("English", userData="en")
+        self.translation_input_language_combo.addItem("日本語", userData="ja")
+        self.translation_input_language_combo.addItem("Français", userData="fr")
+        self.translation_input_language_combo.addItem("Deutsch", userData="de")
+        self.translation_input_language_combo.addItem("Русский", userData="ru")
+        self.translation_input_language_combo.addItem("Español", userData="es")
+        self.translation_input_language_combo.addItem("한국어", userData="ko")
+        self.translation_input_language_combo.addItem("العربية", userData="ar")
+
+        self.translation_output_language_combo = StyledComboBox()
+        self.translation_output_language_combo.addItem("English", userData="en")
+        self.translation_output_language_combo.addItem("日本語", userData="ja")
+        self.translation_output_language_combo.addItem("Français", userData="fr")
+        self.translation_output_language_combo.addItem("Deutsch", userData="de")
+        self.translation_output_language_combo.addItem("Русский", userData="ru")
+        self.translation_output_language_combo.addItem("Español", userData="es")
+        self.translation_output_language_combo.addItem("한국어", userData="ko")
+        self.translation_output_language_combo.addItem("العربية", userData="ar")
 
         self.ollama_host_input = QLineEdit()
         self.ollama_host_input.setPlaceholderText("http://127.0.0.1:11434")
@@ -1663,6 +1688,16 @@ class ConfigsTab(QWidget):
             ("Record Hotkey", "hotkey", self.hotkey_widget),
             ("Whisper Model", "whisper_model", self.whisper_model_combo),
             ("ASR Language", "asr_language", self.language_combo),
+            (
+                "Translation Input Language",
+                "translation_input_language",
+                self.translation_input_language_combo,
+            ),
+            (
+                "Translation Output Language",
+                "translation_output_language",
+                self.translation_output_language_combo,
+            ),
             ("Ollama Host", "ollama_host", self.ollama_host_input),
             ("Ollama Model", "ollama_model", self.ollama_model_combo),
             ("UI Language", "ui_language", self.ui_locale_combo),
@@ -1738,7 +1773,11 @@ class ConfigsTab(QWidget):
         )
 
         for btn_id, (en_text, key) in enumerate(
-            [("Daily", "usage_mode_daily"), ("Vibecoding", "usage_mode_vibecoding")]
+            [
+                ("Daily", "usage_mode_daily"),
+                ("Vibecoding", "usage_mode_vibecoding"),
+                ("Translation", "usage_mode_translation"),
+            ]
         ):
             btn = QPushButton(_tr(self._locale, en_text, key))
             btn.setCheckable(True)
@@ -1749,6 +1788,7 @@ class ConfigsTab(QWidget):
         usage_row.addStretch()
 
         self._usage_mode_group.button(0).setChecked(True)
+        self._usage_mode_group.idClicked.connect(self._on_usage_mode_changed)
         us_layout.addLayout(usage_row)
         content_layout.addWidget(usage_section)
 
@@ -1809,7 +1849,12 @@ class ConfigsTab(QWidget):
         self._locale = settings.ui_locale
         self._apply_locale_texts()
 
-        usage_btn_id = 1 if settings.usage_mode == "vibecoding" else 0
+        if settings.usage_mode == "vibecoding":
+            usage_btn_id = 1
+        elif settings.usage_mode == "translation":
+            usage_btn_id = 2
+        else:
+            usage_btn_id = 0
         usage_btn = self._usage_mode_group.button(usage_btn_id)
         if usage_btn:
             usage_btn.setChecked(True)
@@ -1839,6 +1884,19 @@ class ConfigsTab(QWidget):
         lang_idx = self.language_combo.findData(settings.language)
         self.language_combo.setCurrentIndex(0 if lang_idx < 0 else lang_idx)
 
+        translation_in_idx = self.translation_input_language_combo.findData(
+            settings.translation_input_language
+        )
+        self.translation_input_language_combo.setCurrentIndex(
+            0 if translation_in_idx < 0 else translation_in_idx
+        )
+        translation_out_idx = self.translation_output_language_combo.findData(
+            settings.translation_output_language
+        )
+        self.translation_output_language_combo.setCurrentIndex(
+            0 if translation_out_idx < 0 else translation_out_idx
+        )
+
         self.ollama_host_input.setText(settings.ollama_host)
         self._populate_ollama_models(settings.ollama_host)
         om_idx = self.ollama_model_combo.findText(settings.ollama_model)
@@ -1856,7 +1914,13 @@ class ConfigsTab(QWidget):
         checked_id = self._hotkey_button_group.checkedId()
         hotkey_mode = self._hotkey_mode_map.get(checked_id, "fn")
         lang_data = self.language_combo.currentData()
-        usage_mode = "vibecoding" if self._usage_mode_group.checkedId() == 1 else "daily"
+        usage_mode_id = self._usage_mode_group.checkedId()
+        if usage_mode_id == 1:
+            usage_mode = "vibecoding"
+        elif usage_mode_id == 2:
+            usage_mode = "translation"
+        else:
+            usage_mode = "daily"
         return {
             "usage_mode": usage_mode,
             "mode": str(self._mode_combo.currentData()),
@@ -1866,6 +1930,12 @@ class ConfigsTab(QWidget):
             "custom_hotkey": list(self._custom_hotkey_tokens),
             "whisper_model": self.whisper_model_combo.currentText().strip() or "./local_whisper_model",
             "language": str(lang_data) if lang_data else "zh",
+            "translation_input_language": str(
+                self.translation_input_language_combo.currentData()
+            ),
+            "translation_output_language": str(
+                self.translation_output_language_combo.currentData()
+            ),
             "ollama_host": (
                 self.ollama_host_input.text().strip().rstrip("/")
                 or "http://127.0.0.1:11434"
@@ -1885,6 +1955,9 @@ class ConfigsTab(QWidget):
         )
         self._usage_mode_group.button(1).setText(
             _tr(self._locale, "Vibecoding", "usage_mode_vibecoding")
+        )
+        self._usage_mode_group.button(2).setText(
+            _tr(self._locale, "Translation", "usage_mode_translation")
         )
         self._params_card_title.setText(
             _tr(self._locale, "Base Parameters", "base_params")
@@ -1942,37 +2015,61 @@ class ConfigsTab(QWidget):
     def _on_mode_changed(self, _index: int) -> None:
         self._update_mode_field_visibility()
         mode = str(self._mode_combo.currentData())
-        if mode != "cloud":
+        if mode != "cloud" and self._is_llm_mode_active():
             host = self.ollama_host_input.text().strip() if mode == "remote" else ""
             self._populate_ollama_models(host)
+
+    def _on_usage_mode_changed(self, _button_id: int) -> None:
+        self._update_mode_field_visibility()
+
+    def _is_llm_mode_active(self) -> bool:
+        return self._usage_mode_group.checkedId() in {1, 2}
+
+    def _is_translation_mode_active(self) -> bool:
+        return self._usage_mode_group.checkedId() == 2
 
     def _update_mode_field_visibility(self) -> None:
         mode = str(self._mode_combo.currentData())
         is_cloud = mode == "cloud"
         is_remote = mode == "remote"
+        is_llm_mode = self._is_llm_mode_active()
+        is_translation_mode = self._is_translation_mode_active()
 
-        self._cloud_url_input.setVisible(is_cloud)
-        self._cloud_key_input.setVisible(is_cloud)
-        self.whisper_model_combo.setVisible(not is_cloud)
-        self.language_combo.setVisible(not is_cloud)
-        self.ollama_host_input.setVisible(is_remote)
-        self.ollama_model_combo.setVisible(not is_cloud)
+        self._mode_combo.setVisible(is_llm_mode)
+        self._cloud_url_input.setVisible(is_llm_mode and is_cloud)
+        self._cloud_key_input.setVisible(is_llm_mode and is_cloud)
+        self.whisper_model_combo.setVisible(not is_cloud or not is_llm_mode)
+        self.language_combo.setVisible(not is_cloud or not is_llm_mode)
+        self.translation_input_language_combo.setVisible(is_translation_mode)
+        self.translation_output_language_combo.setVisible(is_translation_mode)
+        self.ollama_host_input.setVisible(is_llm_mode and is_remote)
+        self.ollama_model_combo.setVisible(is_llm_mode and not is_cloud)
 
         for label, _en, key in self._form_labels:
-            if key in ("cloud_api_url", "cloud_api_key"):
-                label.setVisible(is_cloud)
+            if key == "processing_mode":
+                label.setVisible(is_llm_mode)
+            elif key in ("cloud_api_url", "cloud_api_key"):
+                label.setVisible(is_llm_mode and is_cloud)
+            elif key in ("translation_input_language", "translation_output_language"):
+                label.setVisible(is_translation_mode)
             elif key == "ollama_host":
-                label.setVisible(is_remote)
+                label.setVisible(is_llm_mode and is_remote)
             elif key in ("whisper_model", "asr_language", "ollama_model"):
-                label.setVisible(not is_cloud)
+                if key == "ollama_model":
+                    label.setVisible(is_llm_mode and not is_cloud)
+                else:
+                    label.setVisible(not is_cloud or not is_llm_mode)
 
     def _validate_mode_ready(
         self,
         *,
+        usage_mode: str,
         mode: str,
         ollama_host: str,
         ollama_model: str,
     ) -> tuple[bool, str]:
+        if usage_mode == "daily":
+            return True, ""
         if mode == "cloud":
             return True, ""
         if mode not in {"local", "remote"}:
@@ -2114,9 +2211,14 @@ class ConfigsTab(QWidget):
             custom_hotkey = normalized
 
         selected_mode = collected["mode"]
+        usage_mode = collected.get("usage_mode", "daily")
         selected_host = collected["ollama_host"]
         selected_model = collected["ollama_model"]
+        if usage_mode == "daily":
+            selected_mode = "local"
+            selected_host = "http://127.0.0.1:11434"
         ok, reason = self._validate_mode_ready(
+            usage_mode=usage_mode,
             mode=selected_mode,
             ollama_host=selected_host,
             ollama_model=selected_model,
@@ -2161,7 +2263,9 @@ class ConfigsTab(QWidget):
             cloud_api_key=collected["cloud_api_key"],
             custom_llm_prompt=self.controller.settings.custom_llm_prompt,
             custom_vibe_prompt=self.controller.settings.custom_vibe_prompt,
-            usage_mode=collected.get("usage_mode", "daily"),
+            usage_mode=usage_mode,
+            translation_input_language=collected.get("translation_input_language", "zh"),
+            translation_output_language=collected.get("translation_output_language", "en"),
         )
         QTimer.singleShot(0, lambda s=settings, q=quiet: self._apply_settings_deferred(s, q))
 

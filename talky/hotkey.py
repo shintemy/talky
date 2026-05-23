@@ -71,27 +71,35 @@ class HoldToTalkHotkey:
         self._run_loop = None
         self._tap = None
         self._using_fallback = False
+        self._required_modifiers: set[str] = set()
 
     @property
     def using_fallback(self) -> bool:
         return self._using_fallback
 
     def start(self) -> None:
+        self._required_modifiers = set()
+        self._using_fallback = False
         if self.key_mode == "fn":
             started = self._start_fn_quartz_listener()
             if started:
+                self._required_modifiers = {"fn"}
                 return
             self._using_fallback = True
+            self._required_modifiers = {"alt"}
             self._start_modifier_quartz_listener(required={"alt"})
             return
 
         if self.key_mode == "right_option":
+            self._required_modifiers = {"alt"}
             self._start_modifier_quartz_listener(required={"alt"})
             return
         if self.key_mode == "right_command":
+            self._required_modifiers = {"cmd"}
             self._start_modifier_quartz_listener(required={"cmd"})
             return
         if self.key_mode == "command_option":
+            self._required_modifiers = {"cmd", "alt"}
             self._start_modifier_quartz_listener(required={"cmd", "alt"})
             return
         if self.key_mode == "custom":
@@ -99,9 +107,11 @@ class HoldToTalkHotkey:
             required = {k for k in self.custom_keys if k in supported}
             if not required:
                 required = {"alt"}
+            self._required_modifiers = required
             self._start_modifier_quartz_listener(required=required)
             return
 
+        self._required_modifiers = {"alt"}
         self._start_modifier_quartz_listener(required={"alt"})
 
     def stop(self) -> None:
@@ -127,6 +137,21 @@ class HoldToTalkHotkey:
         _safe_join_thread(thread)
         self._quartz_thread = None
         self._pressed = False
+        self._required_modifiers = set()
+
+    def is_pressed_now(self) -> bool:
+        """Read current modifier state directly; fall back to last callback state."""
+        required = self._required_modifiers
+        if not required:
+            return self._pressed
+        try:
+            import Quartz
+
+            source_state = getattr(Quartz, "kCGEventSourceStateCombinedSessionState", 0)
+            flags = Quartz.CGEventSourceFlagsState(source_state)
+            return required.issubset(self._mods_from_flags(flags, Quartz))
+        except Exception:
+            return self._pressed
 
     def is_healthy(self) -> bool:
         """Best-effort health check for quartz listener lifecycle."""
@@ -152,6 +177,22 @@ class HoldToTalkHotkey:
         except Exception:
             return False
 
+    @staticmethod
+    def _mods_from_flags(flags: int, Quartz) -> set[str]:  # noqa: N803
+        mods: set[str] = set()
+        if flags & getattr(Quartz, "kCGEventFlagMaskAlternate", 0):
+            mods.add("alt")
+        if flags & getattr(Quartz, "kCGEventFlagMaskCommand", 0):
+            mods.add("cmd")
+        if flags & getattr(Quartz, "kCGEventFlagMaskControl", 0):
+            mods.add("ctrl")
+        if flags & getattr(Quartz, "kCGEventFlagMaskShift", 0):
+            mods.add("shift")
+        fn_mask = getattr(Quartz, "kCGEventFlagMaskSecondaryFn", 0)
+        if fn_mask and (flags & fn_mask):
+            mods.add("fn")
+        return mods
+
     def _start_modifier_quartz_listener(self, required: set[str]) -> None:
         try:
             import Quartz
@@ -175,17 +216,7 @@ class HoldToTalkHotkey:
             current_flags = Quartz.CGEventSourceFlagsState(source_state)
         except Exception:
             current_flags = 0
-        current_mods: set[str] = set()
-        if current_flags & alt_mask:
-            current_mods.add("alt")
-        if current_flags & cmd_mask:
-            current_mods.add("cmd")
-        if current_flags & ctrl_mask:
-            current_mods.add("ctrl")
-        if current_flags & shift_mask:
-            current_mods.add("shift")
-        if fn_mask and (current_flags & fn_mask):
-            current_mods.add("fn")
+        current_mods = self._mods_from_flags(current_flags, Quartz)
         self._pressed = required.issubset(current_mods)
 
         def _run_event_tap() -> None:
@@ -205,17 +236,7 @@ class HoldToTalkHotkey:
                     return event
 
                 flags = Quartz.CGEventGetFlags(event)
-                current: set[str] = set()
-                if flags & alt_mask:
-                    current.add("alt")
-                if flags & cmd_mask:
-                    current.add("cmd")
-                if flags & ctrl_mask:
-                    current.add("ctrl")
-                if flags & shift_mask:
-                    current.add("shift")
-                if fn_mask and (flags & fn_mask):
-                    current.add("fn")
+                current = self._mods_from_flags(flags, Quartz)
 
                 is_match = required.issubset(current)
                 if is_match and not self._pressed:
