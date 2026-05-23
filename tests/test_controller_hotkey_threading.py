@@ -73,6 +73,32 @@ def test_hotkey_press_runs_recorder_start_on_main_thread(monkeypatch: pytest.Mon
     assert controller._is_recording is True
 
 
+def test_hotkey_press_llm_mode_blocks_when_ollama_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller.settings.usage_mode = "vibecoding"
+    recorder_starts: list[str] = []
+    errors: list[str] = []
+
+    monkeypatch.setattr(
+        controller,
+        "_get_asr",
+        lambda: SimpleNamespace(is_model_available=lambda: True),
+    )
+    monkeypatch.setattr(
+        "talky.controller.check_ollama_reachable",
+        lambda: (False, "Ollama service unavailable: test"),
+    )
+    monkeypatch.setattr(controller.recorder, "start", lambda: recorder_starts.append("start"))
+    controller.error_signal.connect(lambda msg: errors.append(msg))
+
+    controller._handle_hotkey_pressed_main_thread()
+
+    assert recorder_starts == []
+    assert errors and "Ollama service unavailable: test" in errors[-1]
+
+
 def test_hotkey_release_detach_runs_on_main_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     """stop_and_detach (non-blocking) must run on the main Qt thread."""
     controller = _build_controller()

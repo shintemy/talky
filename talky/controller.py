@@ -376,6 +376,22 @@ class AppController(QObject):
         hostname = (parsed.hostname or "").lower()
         return hostname in {"127.0.0.1", "localhost", "::1"}
 
+    def _build_ollama_unreachable_error(self, base_error: str) -> str:
+        host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
+        if self._is_local_ollama_host(host):
+            guide = (
+                "\nRun: ollama serve and ensure model exists: "
+                + self.settings.ollama_model
+            )
+        else:
+            guide = (
+                "\nCheck remote Ollama host and model on: "
+                + host
+                + "\nExpected model: "
+                + self.settings.ollama_model
+            )
+        return base_error + guide
+
     @staticmethod
     def _usage_mode_requires_llm(usage_mode: str) -> bool:
         return usage_mode in {"vibecoding", "translation"}
@@ -563,6 +579,11 @@ class AppController(QObject):
         if not self.is_cloud_mode and not self._get_asr().is_model_available():
             self.error_signal.emit("__MODEL_NOT_FOUND__")
             return
+        if self._usage_mode_requires_llm(self.settings.usage_mode) and not self.is_cloud_mode:
+            ok, error = check_ollama_reachable()
+            if not ok:
+                self.error_signal.emit(self._build_ollama_unreachable_error(error))
+                return
         front_app = get_frontmost_app()
         self._remember_target_front_app(front_app)
         if front_app is not None and has_focus_target(front_app):
@@ -687,20 +708,7 @@ class AppController(QObject):
 
         ok, error = check_ollama_reachable()
         if not ok:
-            host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-            if self._is_local_ollama_host(host):
-                guide = (
-                    "\nRun: ollama serve and ensure model exists: "
-                    + self.settings.ollama_model
-                )
-            else:
-                guide = (
-                    "\nCheck remote Ollama host and model on: "
-                    + host
-                    + "\nExpected model: "
-                    + self.settings.ollama_model
-                )
-            raise RuntimeError(error + guide)
+            raise RuntimeError(self._build_ollama_unreachable_error(error))
 
         if selected_text_snapshot and looks_like_edit_instruction(corrected_raw_text):
             rewritten_text = run_with_timeout(
