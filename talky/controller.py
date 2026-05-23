@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -94,6 +95,32 @@ def normalize_to_simplified_chinese(text: str) -> str:
         return _OPENCC_SIMPLIFIER.convert(text)
     except Exception:
         return text
+
+
+def looks_like_repetitive_asr_hallucination(text: str) -> bool:
+    value = text.strip()
+    if len(value) < 120:
+        return False
+    lower = value.lower()
+    words = re.findall(r"[a-zA-Z']+", lower)
+    if len(words) < 24:
+        return False
+    # Detect pathological loops like:
+    # "means of the finalistic means of the finalistic ..."
+    for size in (3, 4, 5):
+        max_start = len(words) - (size * 6)
+        if max_start < 0:
+            continue
+        for i in range(max_start + 1):
+            chunk = words[i : i + size]
+            repeats = 1
+            j = i + size
+            while j + size <= len(words) and words[j : j + size] == chunk:
+                repeats += 1
+                j += size
+            if repeats >= 6:
+                return True
+    return False
 
 
 class AppController(QObject):
@@ -702,9 +729,16 @@ class AppController(QObject):
         corrected_raw_text = apply_phonetic_dictionary(raw_text, dict_terms)
         if len(corrected_raw_text.replace(" ", "").strip()) < 2:
             return ProcessingResult(final_text="", raw_text=raw_text)
+        if looks_like_repetitive_asr_hallucination(corrected_raw_text):
+            raise RuntimeError(
+                "ASR output appears unstable (repetitive loop). "
+                "Please retry in a quieter environment."
+            )
 
         if self.settings.usage_mode == "daily":
-            return ProcessingResult(final_text=raw_text, raw_text=raw_text)
+            daily_text = normalize_to_simplified_chinese(corrected_raw_text)
+            daily_text = collapse_duplicate_output(daily_text)
+            return ProcessingResult(final_text=daily_text, raw_text=raw_text)
 
         ok, error = check_ollama_reachable()
         if not ok:

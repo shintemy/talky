@@ -421,3 +421,46 @@ def test_process_local_daily_mode_skips_ollama_and_llm(
     assert result.final_text == "Whisper 原文"
     assert result.raw_text == "Whisper 原文"
     assert labels == ["ASR step"]
+
+
+def test_process_local_daily_mode_normalizes_to_simplified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller.settings.usage_mode = "daily"
+
+    monkeypatch.setattr(
+        "talky.controller.check_ollama_reachable",
+        lambda: pytest.fail("Daily mode should not check Ollama"),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_get_asr",
+        lambda: SimpleNamespace(
+            transcribe=lambda *_args, **_kwargs: "我應該發現一個bug。",
+        ),
+    )
+
+    result = controller._process_local(Path("/tmp/input.wav"), asr_timeout_s=3.0)
+
+    assert result.final_text == "我应该发现一个bug。"
+    assert result.raw_text == "我應該發現一個bug。"
+
+
+def test_process_local_rejects_repetitive_asr_hallucination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller.settings.usage_mode = "daily"
+    repetitive = ("means of the finalistic " * 30).strip()
+
+    monkeypatch.setattr(
+        controller,
+        "_get_asr",
+        lambda: SimpleNamespace(
+            transcribe=lambda *_args, **_kwargs: repetitive,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="ASR output appears unstable"):
+        controller._process_local(Path("/tmp/input.wav"), asr_timeout_s=3.0)
