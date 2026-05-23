@@ -1898,13 +1898,10 @@ class ConfigsTab(QWidget):
         )
 
         self.ollama_host_input.setText(settings.ollama_host)
-        self._populate_ollama_models(settings.ollama_host)
-        om_idx = self.ollama_model_combo.findText(settings.ollama_model)
-        if om_idx < 0 and settings.ollama_model:
-            self.ollama_model_combo.addItem(settings.ollama_model)
-            om_idx = self.ollama_model_combo.count() - 1
-        if om_idx >= 0:
-            self.ollama_model_combo.setCurrentIndex(om_idx)
+        self._populate_ollama_models(
+            settings.ollama_host,
+            preferred_model=settings.ollama_model,
+        )
 
         locale_idx = self.ui_locale_combo.findData(settings.ui_locale)
         self.ui_locale_combo.setCurrentIndex(0 if locale_idx < 0 else locale_idx)
@@ -1993,7 +1990,7 @@ class ConfigsTab(QWidget):
             label.setText(_tr(self._locale, en_text, key))
         self._refresh_custom_hotkey_preview()
 
-    def _populate_ollama_models(self, host: str = "") -> None:
+    def _populate_ollama_models(self, host: str = "", *, preferred_model: str = "") -> None:
         from talky.models import list_ollama_models
 
         current = self.ollama_model_combo.currentText()
@@ -2002,12 +1999,22 @@ class ConfigsTab(QWidget):
         models = list_ollama_models(host)
         for m in models:
             self.ollama_model_combo.addItem(m)
-        if current and self.ollama_model_combo.findText(current) < 0:
-            self.ollama_model_combo.addItem(current)
-        if current:
-            idx = self.ollama_model_combo.findText(current)
-            if idx >= 0:
-                self.ollama_model_combo.setCurrentIndex(idx)
+        target = (preferred_model or "").strip() or current.strip()
+        if models:
+            if target:
+                idx = self.ollama_model_combo.findText(target)
+                if idx >= 0:
+                    self.ollama_model_combo.setCurrentIndex(idx)
+                else:
+                    # When configured model is no longer installed, default to
+                    # the first live model from Ollama instead of keeping stale value.
+                    self.ollama_model_combo.setCurrentIndex(0)
+            else:
+                self.ollama_model_combo.setCurrentIndex(0)
+        elif target:
+            # Keep last value only when Ollama model list is currently unavailable.
+            self.ollama_model_combo.addItem(target)
+            self.ollama_model_combo.setCurrentIndex(0)
         self.ollama_model_combo.blockSignals(False)
 
     # -- Mode --
@@ -2021,6 +2028,10 @@ class ConfigsTab(QWidget):
 
     def _on_usage_mode_changed(self, _button_id: int) -> None:
         self._update_mode_field_visibility()
+        mode = str(self._mode_combo.currentData())
+        if mode != "cloud" and self._is_llm_mode_active():
+            host = self.ollama_host_input.text().strip() if mode == "remote" else ""
+            self._populate_ollama_models(host)
 
     def _is_llm_mode_active(self) -> bool:
         return self._usage_mode_group.checkedId() in {1, 2}
