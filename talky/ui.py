@@ -1528,6 +1528,8 @@ class ConfigsTab(QWidget):
         self._locale = locale
         self._custom_hotkey_tokens: list[str] = []
         self._form_labels: list[tuple[QLabel, str, str]] = []
+        self._is_loading_settings = False
+        self._pending_auto_save = False
 
         # ---- Processing Mode ----
         self._mode_combo = StyledComboBox()
@@ -1620,6 +1622,9 @@ class ConfigsTab(QWidget):
         self.language_combo.addItem("Español", userData="es")
         self.language_combo.addItem("Русский", userData="ru")
         self.language_combo.addItem("العربية", userData="ar")
+        self.language_combo.currentIndexChanged.connect(
+            lambda _idx: self._schedule_quiet_auto_save()
+        )
 
         self.translation_output_language_combo = StyledComboBox()
         self.translation_output_language_combo.addItem("English", userData="en")
@@ -1630,14 +1635,21 @@ class ConfigsTab(QWidget):
         self.translation_output_language_combo.addItem("Español", userData="es")
         self.translation_output_language_combo.addItem("한국어", userData="ko")
         self.translation_output_language_combo.addItem("العربية", userData="ar")
+        self.translation_output_language_combo.currentIndexChanged.connect(
+            lambda _idx: self._schedule_quiet_auto_save()
+        )
 
         self.ollama_host_input = QLineEdit()
         self.ollama_host_input.setPlaceholderText("http://127.0.0.1:11434")
         self.ollama_host_input.editingFinished.connect(
             lambda: self._populate_ollama_models(self.ollama_host_input.text().strip())
         )
+        self.ollama_host_input.editingFinished.connect(self._schedule_quiet_auto_save)
 
         self.ollama_model_combo = StyledComboBox()
+        self.ollama_model_combo.currentIndexChanged.connect(
+            lambda _idx: self._schedule_quiet_auto_save()
+        )
 
         self.ui_locale_combo = StyledComboBox()
         self.ui_locale_combo.addItem(
@@ -1645,6 +1657,9 @@ class ConfigsTab(QWidget):
         )
         self.ui_locale_combo.addItem(
             _tr(self._locale, "Chinese", "ui_option_chinese"), userData="mixed"
+        )
+        self.ui_locale_combo.currentIndexChanged.connect(
+            lambda _idx: self._schedule_quiet_auto_save()
         )
 
         # ---- Permission widgets ----
@@ -1924,6 +1939,7 @@ class ConfigsTab(QWidget):
     # -- Load / Collect --
 
     def load_from_settings(self, settings: AppSettings) -> None:
+        self._is_loading_settings = True
         self._locale = settings.ui_locale
         self._apply_locale_texts()
 
@@ -1979,6 +1995,7 @@ class ConfigsTab(QWidget):
         locale_idx = self.ui_locale_combo.findData(settings.ui_locale)
         self.ui_locale_combo.setCurrentIndex(0 if locale_idx < 0 else locale_idx)
         self._refresh_permission_status()
+        self._is_loading_settings = False
 
     def collect_settings(self) -> dict:
         checked_id = self._hotkey_button_group.checkedId()
@@ -2120,6 +2137,7 @@ class ConfigsTab(QWidget):
         if mode != "cloud" and self._is_llm_mode_active():
             host = self.ollama_host_input.text().strip() if mode == "remote" else ""
             self._populate_ollama_models(host)
+        self._schedule_quiet_auto_save()
 
     def _on_usage_mode_changed(self, _button_id: int) -> None:
         if not self._ensure_llm_mode_ready_or_revert():
@@ -2130,6 +2148,7 @@ class ConfigsTab(QWidget):
         if mode != "cloud" and self._is_llm_mode_active():
             host = self.ollama_host_input.text().strip() if mode == "remote" else ""
             self._populate_ollama_models(host)
+        self._schedule_quiet_auto_save()
 
     def _set_usage_mode_selection(self, usage_mode: str) -> None:
         usage_btn_id = 0
@@ -2285,6 +2304,7 @@ class ConfigsTab(QWidget):
 
     def _on_hotkey_mode_changed(self, _button_id: int) -> None:
         self._apply_hotkey_control_state()
+        self._schedule_quiet_auto_save()
 
     def _apply_hotkey_control_state(self) -> None:
         checked_id = self._hotkey_button_group.checkedId()
@@ -2340,6 +2360,20 @@ class ConfigsTab(QWidget):
         if btn:
             btn.setChecked(True)
         self._apply_hotkey_control_state()
+        self._schedule_quiet_auto_save()
+
+    def _schedule_quiet_auto_save(self) -> None:
+        if self._is_loading_settings or self._pending_auto_save:
+            return
+        self._pending_auto_save = True
+
+        def _flush() -> None:
+            self._pending_auto_save = False
+            if self._is_loading_settings:
+                return
+            self._save_settings(quiet=True)
+
+        QTimer.singleShot(0, _flush)
 
     # -- Permissions --
 
