@@ -56,6 +56,7 @@ from talky.hotkey import GlobalShortcutListener, label_for_hotkey_tokens
 from talky.models import AppSettings
 from talky.recommended_ollama import recommended_model_name
 from talky.permissions import (
+    check_input_monitoring_granted,
     check_microphone_granted,
     is_accessibility_trusted,
     request_microphone_permission,
@@ -99,6 +100,7 @@ _ZH = {
     "copy_close": "复制并关闭",
     "permission_status": "权限状态",
     "mic_permission": "麦克风权限",
+    "input_monitoring_permission": "输入监控权限",
     "accessibility_permission": "辅助功能权限",
     "granted": "已授权",
     "not_granted": "未授权",
@@ -161,6 +163,11 @@ _ZH = {
     "usage_mode_translation": "Translation",
     "translation_input_language": "翻译输入语言",
     "translation_output_language": "翻译输出语言",
+    "ollama_model_placeholder": "请先启动 Ollama 以加载模型",
+    "llm_mode_requires_ollama_title": "需要 Ollama",
+    "llm_mode_requires_ollama_body": "Vibecoding / Translation 依赖 Ollama。\n请先启动 Ollama（或运行 `ollama serve`）并确认模型可用。",
+    "open_ollama": "打开 Ollama",
+    "keep_daily_mode": "保持 Daily 模式",
     # Prompt tab
     "prompt": "Prompt",
     "prompt_section_title": "For Daily Usage",
@@ -1661,6 +1668,15 @@ class ConfigsTab(QWidget):
         )
         self.ax_status_value_label = QLabel("")
 
+        self.input_monitoring_permission_label = QLabel(
+            _tr(self._locale, "Input Monitoring", "input_monitoring_permission")
+        )
+        self.input_monitoring_permission_label.setObjectName("FormLabel")
+        self.input_monitoring_permission_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.input_monitoring_status_value_label = QLabel("")
+
         self.permission_button = QPushButton(
             _tr(self._locale, "Check Accessibility", "check_accessibility")
         )
@@ -1728,6 +1744,8 @@ class ConfigsTab(QWidget):
         perm_grid.addWidget(self.ax_permission_label, 1, 0)
         perm_grid.addWidget(self.ax_status_value_label, 1, 1)
         perm_grid.addWidget(self.permission_button, 1, 2)
+        perm_grid.addWidget(self.input_monitoring_permission_label, 2, 0)
+        perm_grid.addWidget(self.input_monitoring_status_value_label, 2, 1)
 
         # ---- Assemble layout ----
         outer = QVBoxLayout(self)
@@ -1968,6 +1986,9 @@ class ConfigsTab(QWidget):
         self.ax_permission_label.setText(
             _tr(self._locale, "Accessibility", "accessibility_permission")
         )
+        self.input_monitoring_permission_label.setText(
+            _tr(self._locale, "Input Monitoring", "input_monitoring_permission")
+        )
         self.permission_button.setText(
             _tr(self._locale, "Check Accessibility", "check_accessibility")
         )
@@ -2015,6 +2036,15 @@ class ConfigsTab(QWidget):
             # Keep last value only when Ollama model list is currently unavailable.
             self.ollama_model_combo.addItem(target)
             self.ollama_model_combo.setCurrentIndex(0)
+        elif not models:
+            self.ollama_model_combo.addItem(
+                _tr(
+                    self._locale,
+                    "Start Ollama to load models",
+                    "ollama_model_placeholder",
+                )
+            )
+            self.ollama_model_combo.setCurrentIndex(0)
         self.ollama_model_combo.blockSignals(False)
 
     # -- Mode --
@@ -2027,11 +2057,68 @@ class ConfigsTab(QWidget):
             self._populate_ollama_models(host)
 
     def _on_usage_mode_changed(self, _button_id: int) -> None:
+        if not self._ensure_llm_mode_ready_or_revert():
+            return
         self._update_mode_field_visibility()
         mode = str(self._mode_combo.currentData())
         if mode != "cloud" and self._is_llm_mode_active():
             host = self.ollama_host_input.text().strip() if mode == "remote" else ""
             self._populate_ollama_models(host)
+
+    def _set_usage_mode_selection(self, usage_mode: str) -> None:
+        usage_btn_id = 0
+        if usage_mode == "vibecoding":
+            usage_btn_id = 1
+        elif usage_mode == "translation":
+            usage_btn_id = 2
+        btn = self._usage_mode_group.button(usage_btn_id)
+        if btn:
+            btn.setChecked(True)
+
+    def _ensure_llm_mode_ready_or_revert(self) -> bool:
+        mode = str(self._mode_combo.currentData())
+        if not self._is_llm_mode_active():
+            return True
+        if mode == "cloud":
+            return True
+        host = self.ollama_host_input.text().strip() if mode == "remote" else "http://127.0.0.1:11434"
+        model = self.ollama_model_combo.currentText().strip() or recommended_model_name()
+        ok, _reason = self._validate_mode_ready(
+            usage_mode="vibecoding",
+            mode=mode,
+            ollama_host=host,
+            ollama_model=model,
+        )
+        if ok:
+            return True
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(_tr(self._locale, "Ollama Required", "llm_mode_requires_ollama_title"))
+        box.setText(_tr(
+            self._locale,
+            "Vibecoding / Translation requires Ollama.\nStart Ollama (or run `ollama serve`) and ensure a model is available.",
+            "llm_mode_requires_ollama_body",
+        ))
+        open_btn = box.addButton(
+            _tr(self._locale, "Open Ollama", "open_ollama"),
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        keep_btn = box.addButton(
+            _tr(self._locale, "Keep Daily", "keep_daily_mode"),
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        box.setDefaultButton(keep_btn)
+        box.exec()
+        if box.clickedButton() == open_btn:
+            try:
+                subprocess.Popen(["open", "-a", "Ollama"])  # noqa: S603,S607
+            except Exception:
+                pass
+        self._set_usage_mode_selection("daily")
+        self._update_mode_field_visibility()
+        self._populate_ollama_models(host)
+        return False
 
     def _is_llm_mode_active(self) -> bool:
         return self._usage_mode_group.checkedId() in {1, 2}
@@ -2168,6 +2255,7 @@ class ConfigsTab(QWidget):
 
     def _refresh_permission_status(self) -> None:
         mic_ok, _ = check_microphone_granted()
+        input_ok = check_input_monitoring_granted()
         ax_ok = is_accessibility_trusted(prompt=False)
 
         granted_text = _tr(self._locale, "Granted", "granted")
@@ -2184,6 +2272,12 @@ class ConfigsTab(QWidget):
             f"\u2713 {granted_text}" if ax_ok else f"\u2717 {denied_text}"
         )
         self.ax_status_value_label.setStyleSheet(ok_style if ax_ok else fail_style)
+        self.input_monitoring_status_value_label.setText(
+            f"\u2713 {granted_text}" if input_ok else f"\u2717 {denied_text}"
+        )
+        self.input_monitoring_status_value_label.setStyleSheet(
+            ok_style if input_ok else fail_style
+        )
 
         self.request_mic_button.setVisible(not mic_ok)
         self.permission_button.setVisible(not ax_ok)
@@ -2235,26 +2329,12 @@ class ConfigsTab(QWidget):
             ollama_model=selected_model,
         )
         if not ok:
-            if selected_mode in {"local", "remote"}:
-                append_debug_log(
-                    "Non-blocking mode validation warning while saving settings: "
-                    f"mode={selected_mode}; host={selected_host}; reason={reason}"
-                )
-                if not quiet:
-                    QMessageBox.warning(
-                        self,
-                        "Talky",
-                        reason
-                        + "\n\nSettings will still be saved. "
-                        "You can start Ollama later and retry.",
-                    )
-            else:
-                if not quiet:
-                    QMessageBox.warning(self, "Talky", reason)
-                    current_idx = self._mode_combo.findData(self.controller.settings.mode)
-                    if current_idx >= 0:
-                        self._mode_combo.setCurrentIndex(current_idx)
-                return
+            if not quiet:
+                QMessageBox.warning(self, "Talky", reason)
+                current_idx = self._mode_combo.findData(self.controller.settings.mode)
+                if current_idx >= 0:
+                    self._mode_combo.setCurrentIndex(current_idx)
+            return
 
         settings = AppSettings(
             custom_dictionary=self.controller.settings.custom_dictionary,
