@@ -226,7 +226,7 @@ def test_build_llm_prompt_translation_uses_language_pair() -> None:
     prompt = build_llm_system_prompt(
         ["K8s"],
         usage_mode="translation",
-        translation_input_language="zh",
+        translation_source_language="zh",
         translation_output_language="de",
     )
 

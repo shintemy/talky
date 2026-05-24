@@ -163,7 +163,6 @@ _ZH = {
     "usage_mode_daily": "Daily",
     "usage_mode_vibecoding": "Vibecoding",
     "usage_mode_translation": "Translation",
-    "translation_input_language": "翻译输入语言",
     "translation_output_language": "翻译输出语言",
     "ollama_model_placeholder": "请先启动 Ollama 以加载模型",
     "llm_mode_requires_ollama_title": "需要 Ollama",
@@ -1614,17 +1613,6 @@ class ConfigsTab(QWidget):
         self.language_combo.addItem("Русский", userData="ru")
         self.language_combo.addItem("العربية", userData="ar")
 
-        self.translation_input_language_combo = StyledComboBox()
-        self.translation_input_language_combo.addItem("中文", userData="zh")
-        self.translation_input_language_combo.addItem("English", userData="en")
-        self.translation_input_language_combo.addItem("日本語", userData="ja")
-        self.translation_input_language_combo.addItem("Français", userData="fr")
-        self.translation_input_language_combo.addItem("Deutsch", userData="de")
-        self.translation_input_language_combo.addItem("Русский", userData="ru")
-        self.translation_input_language_combo.addItem("Español", userData="es")
-        self.translation_input_language_combo.addItem("한국어", userData="ko")
-        self.translation_input_language_combo.addItem("العربية", userData="ar")
-
         self.translation_output_language_combo = StyledComboBox()
         self.translation_output_language_combo.addItem("English", userData="en")
         self.translation_output_language_combo.addItem("日本語", userData="ja")
@@ -1711,11 +1699,6 @@ class ConfigsTab(QWidget):
             ("Record Hotkey", "hotkey", self.hotkey_widget),
             ("Whisper Model", "whisper_model", self.whisper_model_combo),
             ("ASR Language", "asr_language", self.language_combo),
-            (
-                "Translation Input Language",
-                "translation_input_language",
-                self.translation_input_language_combo,
-            ),
             (
                 "Translation Output Language",
                 "translation_output_language",
@@ -1910,12 +1893,6 @@ class ConfigsTab(QWidget):
         lang_idx = self.language_combo.findData(settings.language)
         self.language_combo.setCurrentIndex(0 if lang_idx < 0 else lang_idx)
 
-        translation_in_idx = self.translation_input_language_combo.findData(
-            settings.translation_input_language
-        )
-        self.translation_input_language_combo.setCurrentIndex(
-            0 if translation_in_idx < 0 else translation_in_idx
-        )
         translation_out_idx = self.translation_output_language_combo.findData(
             settings.translation_output_language
         )
@@ -1953,9 +1930,6 @@ class ConfigsTab(QWidget):
             "custom_hotkey": list(self._custom_hotkey_tokens),
             "whisper_model": self.whisper_model_combo.currentText().strip() or "./local_whisper_model",
             "language": str(lang_data) if lang_data else "zh",
-            "translation_input_language": str(
-                self.translation_input_language_combo.currentData()
-            ),
             "translation_output_language": str(
                 self.translation_output_language_combo.currentData()
             ),
@@ -2149,7 +2123,6 @@ class ConfigsTab(QWidget):
         self._cloud_key_input.setVisible(is_llm_mode and is_cloud)
         self.whisper_model_combo.setVisible(not is_cloud or not is_llm_mode)
         self.language_combo.setVisible(not is_cloud or not is_llm_mode)
-        self.translation_input_language_combo.setVisible(is_translation_mode)
         self.translation_output_language_combo.setVisible(is_translation_mode)
         self.ollama_host_input.setVisible(is_llm_mode and is_remote)
         self.ollama_model_combo.setVisible(is_llm_mode and not is_cloud)
@@ -2159,7 +2132,7 @@ class ConfigsTab(QWidget):
                 label.setVisible(is_llm_mode)
             elif key in ("cloud_api_url", "cloud_api_key"):
                 label.setVisible(is_llm_mode and is_cloud)
-            elif key in ("translation_input_language", "translation_output_language"):
+            elif key in ("translation_output_language",):
                 label.setVisible(is_translation_mode)
             elif key == "ollama_host":
                 label.setVisible(is_llm_mode and is_remote)
@@ -2371,7 +2344,6 @@ class ConfigsTab(QWidget):
             custom_llm_prompt=self.controller.settings.custom_llm_prompt,
             custom_vibe_prompt=self.controller.settings.custom_vibe_prompt,
             usage_mode=usage_mode,
-            translation_input_language=collected.get("translation_input_language", "zh"),
             translation_output_language=collected.get("translation_output_language", "en"),
         )
         QTimer.singleShot(0, lambda s=settings, q=quiet: self._apply_settings_deferred(s, q))

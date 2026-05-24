@@ -60,7 +60,6 @@ class AppSettings:
     custom_llm_prompt: str = ""
     custom_vibe_prompt: str = ""
     usage_mode: str = "daily"  # "daily" | "vibecoding" | "translation"
-    translation_input_language: str = "zh"
     translation_output_language: str = "en"
     direct_whisper_output: bool = False
     wake_guard_gap_threshold_s: float = 20.0
@@ -100,7 +99,6 @@ class AppSettings:
             custom_llm_prompt=custom_prompt,
             custom_vibe_prompt=custom_vibe,
             usage_mode=str(data.get("usage_mode", "daily")),
-            translation_input_language=str(data.get("translation_input_language", "zh")),
             translation_output_language=str(data.get("translation_output_language", "en")),
             direct_whisper_output=bool(data.get("direct_whisper_output", False)),
             wake_guard_gap_threshold_s=float(data.get("wake_guard_gap_threshold_s", 20.0)),

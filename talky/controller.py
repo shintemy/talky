@@ -768,7 +768,7 @@ class AppController(QObject):
                 custom_prompt_template=self.settings.custom_llm_prompt,
                 usage_mode=self.settings.usage_mode,
                 custom_vibe_template=self.settings.custom_vibe_prompt,
-                translation_input_language=self.settings.translation_input_language,
+                translation_source_language=self.settings.language,
                 translation_output_language=self.settings.translation_output_language,
             ),
             _LLM_STEP_TIMEOUT_S,

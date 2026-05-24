@@ -370,7 +370,7 @@ def build_llm_system_prompt(
     custom_template: str = "",
     usage_mode: str = "daily",
     custom_vibe_template: str = "",
-    translation_input_language: str = "zh",
+    translation_source_language: str = "zh",
     translation_output_language: str = "en",
 ) -> str:
     dictionary_text = _format_dictionary(dictionary_terms)
@@ -379,7 +379,7 @@ def build_llm_system_prompt(
         template = raw if raw else VIBECODING_LLM_PROMPT_TEMPLATE
     elif usage_mode == "translation":
         source = _TRANSLATION_LANGUAGE_NAMES.get(
-            (translation_input_language or "zh").strip().lower(),
+            (translation_source_language or "zh").strip().lower(),
             "Chinese",
         )
         target = _TRANSLATION_LANGUAGE_NAMES.get(
