@@ -141,7 +141,7 @@ def test_request_input_monitoring_permission_calls_system_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     permissions = importlib.import_module("talky.permissions")
-    called = {"request": 0}
+    called = {"request": 0, "open_settings": 0}
 
     fake_quartz = types.SimpleNamespace(
         CGPreflightListenEventAccess=lambda: False,
@@ -149,6 +149,52 @@ def test_request_input_monitoring_permission_calls_system_request(
         or True,
     )
     monkeypatch.setitem(sys.modules, "Quartz", fake_quartz)
+    monkeypatch.setattr(
+        permissions,
+        "open_input_monitoring_settings",
+        lambda: called.__setitem__("open_settings", called["open_settings"] + 1) or True,
+    )
 
     assert permissions.request_input_monitoring_permission() is True
     assert called["request"] == 1
+    assert called["open_settings"] == 1
+
+
+def test_input_monitoring_settings_url_uses_modern_scheme_on_ventura_plus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    permissions = importlib.import_module("talky.permissions")
+    monkeypatch.setattr(permissions.platform, "mac_ver", lambda: ("14.0", ("", "", ""), ""))
+
+    url = permissions.input_monitoring_settings_url()
+
+    assert "PrivacySecurity.extension" in url
+    assert "Privacy_ListenEvent" in url
+
+
+def test_input_monitoring_settings_url_uses_legacy_scheme_on_monterey(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    permissions = importlib.import_module("talky.permissions")
+    monkeypatch.setattr(permissions.platform, "mac_ver", lambda: ("12.7", ("", "", ""), ""))
+
+    url = permissions.input_monitoring_settings_url()
+
+    assert url.endswith("com.apple.preference.security?Privacy_ListenEvent")
+
+
+def test_open_input_monitoring_settings_runs_open_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    permissions = importlib.import_module("talky.permissions")
+    called: list[str] = []
+
+    monkeypatch.setattr(permissions, "input_monitoring_settings_url", lambda: "test://input-monitoring")
+    monkeypatch.setattr(
+        permissions.subprocess,
+        "run",
+        lambda args, check=False: called.extend(args) or types.SimpleNamespace(returncode=0),  # noqa: ARG005
+    )
+
+    assert permissions.open_input_monitoring_settings() is True
+    assert called == ["open", "test://input-monitoring"]

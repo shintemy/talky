@@ -2,10 +2,52 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
+import subprocess
 import sys
 import threading
 import urllib.request
+
+
+def _macos_version_tuple() -> tuple[int, int]:
+    try:
+        parts = platform.mac_ver()[0].split(".")
+        major = int(parts[0]) if parts and parts[0].isdigit() else 0
+        minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        return major, minor
+    except Exception:
+        return 0, 0
+
+
+def input_monitoring_settings_url() -> str:
+    """Deep link to Privacy & Security > Input Monitoring."""
+    major, _minor = _macos_version_tuple()
+    if major >= 13:
+        return (
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension"
+            "?Privacy_ListenEvent"
+        )
+    return "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+
+
+def open_input_monitoring_settings() -> bool:
+    """Open System Settings to Input Monitoring (best-effort)."""
+    if sys.platform != "darwin":
+        return False
+    url = input_monitoring_settings_url()
+    try:
+        subprocess.run(["open", url], check=False)  # noqa: S603
+        return True
+    except Exception:
+        pass
+    try:
+        from AppKit import NSWorkspace
+        from Foundation import NSURL
+
+        return bool(NSWorkspace.sharedWorkspace().openURL_(NSURL.URLWithString_(url)))
+    except Exception:
+        return False
 
 
 def is_accessibility_trusted(prompt: bool = False) -> bool:
@@ -43,10 +85,10 @@ def request_input_monitoring_permission() -> bool:
 
         request = getattr(Quartz, "CGRequestListenEventAccess", None)
         if callable(request):
-            return bool(request())
+            request()
     except Exception:
-        return False
-    return False
+        pass
+    return open_input_monitoring_settings()
 
 
 def is_ollama_installed() -> bool:
