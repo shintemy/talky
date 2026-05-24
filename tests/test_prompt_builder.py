@@ -241,6 +241,7 @@ def test_build_llm_prompt_translation_uses_language_pair() -> None:
     assert "translation" in prompt.lower()
     assert "Chinese" in prompt
     assert "German" in prompt
+    assert "NEVER output Chinese" in prompt
     assert "K8s" in prompt
 
 

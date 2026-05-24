@@ -169,6 +169,25 @@ def test_clean_never_returns_thinking_fallback() -> None:
     assert result == "你来操作"
 
 
+def test_clean_translation_mode_does_not_fallback_to_source() -> None:
+    def chat_impl(**kwargs):  # noqa: ANN003
+        del kwargs
+        return [{"message": {"content": "", "thinking": ""}}]
+
+    llm_service = _load_llm_service_with_fake_ollama(chat_impl)
+    cleaner = llm_service.OllamaTextCleaner(model_name="dummy")
+
+    result = cleaner.clean(
+        raw_text="今天沅沅跟奶奶出去楼下玩。",
+        dictionary_terms=[],
+        usage_mode="translation",
+        translation_source_language="zh",
+        translation_output_language="ja",
+    )
+
+    assert result == ""
+
+
 def test_clean_sets_num_predict_by_usage_mode() -> None:
     captured_calls = []
 

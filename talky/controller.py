@@ -45,6 +45,7 @@ from talky.text_guard import (
     enforce_source_boundaries,
     strip_trailing_asr_translation_hallucination,
     looks_like_unexpected_english_asr_output,
+    looks_like_wrong_translation_output,
 )
 from talky.wake_guard import (
     normalize_wake_guard_threshold,
@@ -757,6 +758,59 @@ class AppController(QObject):
         )
         return raw_text
 
+    def _run_llm_for_mode(self, *, corrected_raw_text: str, dict_terms: list[str]) -> str:
+        usage_mode = self.settings.usage_mode
+
+        def _call_llm(*, translation_strict_retry: bool = False) -> str:
+            return self.llm.clean(
+                raw_text=corrected_raw_text,
+                dictionary_terms=dict_terms,
+                custom_prompt_template=self.settings.custom_llm_prompt,
+                usage_mode=usage_mode,
+                custom_vibe_template=self.settings.custom_vibe_prompt,
+                translation_source_language=self.settings.language,
+                translation_output_language=self.settings.translation_output_language,
+                translation_strict_retry=translation_strict_retry,
+            )
+
+        final_text = run_with_timeout(
+            lambda: _call_llm(),
+            _LLM_STEP_TIMEOUT_S,
+            label="LLM step",
+        )
+        if usage_mode != "translation":
+            return final_text
+
+        target = self.settings.translation_output_language
+        if looks_like_wrong_translation_output(
+            final_text,
+            target_language=target,
+            source_text=corrected_raw_text,
+        ):
+            append_debug_log(
+                "Translation target mismatch; retrying once: "
+                f"target={target!r}; preview={final_text[:120]!r}"
+            )
+            final_text = run_with_timeout(
+                lambda: _call_llm(translation_strict_retry=True),
+                _LLM_STEP_TIMEOUT_S,
+                label="LLM translation retry step",
+            )
+        if looks_like_wrong_translation_output(
+            final_text,
+            target_language=target,
+            source_text=corrected_raw_text,
+        ):
+            raise RuntimeError(
+                f"Translation output did not match target language ({target}). Please retry."
+            )
+        append_debug_log(
+            f"Translation result: target={target!r}; preview={final_text[:120]!r}"
+        )
+        if target == "zh":
+            final_text = normalize_to_simplified_chinese(final_text)
+        return final_text
+
     def _process_local(
         self,
         wav_path: Path,
@@ -800,7 +854,11 @@ class AppController(QObject):
         if not ok:
             raise RuntimeError(self._build_ollama_unreachable_error(error))
 
-        if selected_text_snapshot and looks_like_edit_instruction(corrected_raw_text):
+        if (
+            selected_text_snapshot
+            and looks_like_edit_instruction(corrected_raw_text)
+            and self.settings.usage_mode != "translation"
+        ):
             rewritten_text = run_with_timeout(
                 lambda: self.llm.rewrite_selected_text(
                     selected_text=selected_text_snapshot,
@@ -817,24 +875,13 @@ class AppController(QObject):
             return ProcessingResult(final_text=rewritten_text)
 
         llm_start = time.perf_counter()
-        final_text = run_with_timeout(
-            lambda: self.llm.clean(
-                raw_text=corrected_raw_text,
-                dictionary_terms=dict_terms,
-                custom_prompt_template=self.settings.custom_llm_prompt,
-                usage_mode=self.settings.usage_mode,
-                custom_vibe_template=self.settings.custom_vibe_prompt,
-                translation_source_language=self.settings.language,
-                translation_output_language=self.settings.translation_output_language,
-            ),
-            _LLM_STEP_TIMEOUT_S,
-            label="LLM step",
+        final_text = self._run_llm_for_mode(
+            corrected_raw_text=corrected_raw_text,
+            dict_terms=dict_terms,
         )
         llm_elapsed = time.perf_counter() - llm_start
         print(f"[Talky] LLM elapsed: {llm_elapsed:.2f}s")
-        if self.settings.usage_mode == "translation":
-            final_text = normalize_to_simplified_chinese(final_text)
-        elif self.settings.usage_mode != "vibecoding":
+        if self.settings.usage_mode == "vibecoding":
             final_text = apply_phonetic_dictionary(final_text, dict_terms)
             final_text = normalize_person_pronouns(final_text, person_terms)
             final_text = enforce_pronoun_consistency(corrected_raw_text, final_text)
@@ -898,7 +945,7 @@ class AppController(QObject):
                 f"overall_timeout={self._processing_timeout_s:.1f}s"
             )
             self._processing_wav_path = wav_path
-            self._persist_debug_audio_if_enabled(wav_path)
+            debug_audio_path = self._persist_debug_audio_if_enabled(wav_path)
 
             selected_text_snapshot = ""
             if has_focus:
@@ -935,7 +982,14 @@ class AppController(QObject):
             self._last_output_ts = now
 
             print(f"[Talky] Final text: {final_text}")
-            history_path = self.history_store.append(final_text, raw_text=raw_text)
+            history_path = self.history_store.append(
+                final_text,
+                raw_text=raw_text,
+                usage_mode=self.settings.usage_mode,
+                asr_language=self.settings.language,
+                translation_output_language=self.settings.translation_output_language,
+                debug_audio_path=debug_audio_path,
+            )
             print(f"[Talky] History appended: {history_path}")
 
             current_front_app = get_frontmost_app()
@@ -963,16 +1017,22 @@ class AppController(QObject):
                 except Exception:
                     pass
 
-    def _persist_debug_audio_if_enabled(self, source_wav: Path) -> None:
+    def _persist_debug_audio_if_enabled(self, source_wav: Path) -> Path | None:
         if not self.settings.debug_audio_enabled:
-            return
+            return None
         try:
             output_dir = Path.home() / ".talky" / "debug-audio"
             output_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-            target = output_dir / (
-                f"{ts}-mode_{self.settings.usage_mode}-asr_{self.settings.language}.wav"
-            )
+            if self.settings.usage_mode == "translation":
+                target = output_dir / (
+                    f"{ts}-mode_{self.settings.usage_mode}-asr_{self.settings.language}"
+                    f"-target_{self.settings.translation_output_language}.wav"
+                )
+            else:
+                target = output_dir / (
+                    f"{ts}-mode_{self.settings.usage_mode}-asr_{self.settings.language}.wav"
+                )
             shutil.copy2(source_wav, target)
 
             max_files = max(1, min(int(self.settings.debug_audio_max_files), 500))
@@ -985,8 +1045,10 @@ class AppController(QObject):
                 stale.unlink(missing_ok=True)
 
             append_debug_log(f"debug audio saved: {target}")
+            return target
         except Exception as exc:
             append_debug_log(f"debug audio save failed: {exc}")
+            return None
 
     def _emit_pipeline_state(self, state: str, *, source: str) -> None:
         previous = self._last_pipeline_state

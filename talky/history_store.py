@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class HistoryEntryMetadata:
+    usage_mode: str = ""
+    asr_language: str = ""
+    translation_output_language: str = ""
+    debug_audio_path: str = ""
 
 
 class HistoryStore:
@@ -37,14 +46,26 @@ class HistoryStore:
         text: str,
         now: datetime | None = None,
         raw_text: str = "",
+        *,
+        usage_mode: str = "",
+        asr_language: str = "",
+        translation_output_language: str = "",
+        debug_audio_path: str | Path | None = None,
     ) -> Path:
         timestamp = now or datetime.now()
         self.history_dir.mkdir(parents=True, exist_ok=True)
         file_path = self.history_dir / f"{timestamp:%Y-%m-%d}.md"
+        metadata = HistoryEntryMetadata(
+            usage_mode=(usage_mode or "").strip(),
+            asr_language=(asr_language or "").strip(),
+            translation_output_language=(translation_output_language or "").strip(),
+            debug_audio_path=self._normalize_debug_audio_path(debug_audio_path),
+        )
         entry = self._format_entry(
             text=text,
             timestamp=timestamp,
             raw_text=raw_text,
+            metadata=metadata,
         )
         with file_path.open("a", encoding="utf-8") as f:
             f.write(entry)
@@ -77,9 +98,49 @@ class HistoryStore:
         entries.reverse()
         return entries
 
-    def _format_entry(self, text: str, timestamp: datetime, raw_text: str = "") -> str:
+    @staticmethod
+    def _normalize_debug_audio_path(debug_audio_path: str | Path | None) -> str:
+        if not debug_audio_path:
+            return ""
+        try:
+            return str(Path(debug_audio_path).expanduser().resolve())
+        except Exception:
+            return str(debug_audio_path)
+
+    @staticmethod
+    def _format_usage_mode_label(usage_mode: str) -> str:
+        mapping = {
+            "daily": "Daily",
+            "vibecoding": "Vibecoding",
+            "translation": "Translation",
+        }
+        return mapping.get(usage_mode.strip().lower(), usage_mode or "Unknown")
+
+    def _format_metadata_block(self, metadata: HistoryEntryMetadata) -> str:
+        lines: list[str] = []
+        if metadata.usage_mode:
+            lines.append(f"模式: {self._format_usage_mode_label(metadata.usage_mode)}")
+        if metadata.asr_language:
+            lines.append(f"ASR 语言: {metadata.asr_language}")
+        if metadata.usage_mode == "translation" and metadata.translation_output_language:
+            lines.append(f"目标语言: {metadata.translation_output_language}")
+        if metadata.debug_audio_path:
+            lines.append(f"调试音频: {metadata.debug_audio_path}")
+        if not lines:
+            return ""
+        return "\n".join(lines) + "\n\n"
+
+    def _format_entry(
+        self,
+        text: str,
+        timestamp: datetime,
+        raw_text: str = "",
+        metadata: HistoryEntryMetadata | None = None,
+    ) -> str:
         safe_text = text.strip()
         safe_raw_text = raw_text.strip()
+        meta_block = self._format_metadata_block(metadata or HistoryEntryMetadata())
         if safe_raw_text:
             safe_text = f"最终输出\n\n{safe_text}\n\n原文\n\n{safe_raw_text}"
-        return f"## {timestamp:%H:%M:%S}\n\n{safe_text}\n\n"
+        body = f"{meta_block}{safe_text}" if meta_block else safe_text
+        return f"## {timestamp:%H:%M:%S}\n\n{body}\n\n"

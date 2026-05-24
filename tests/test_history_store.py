@@ -73,3 +73,32 @@ def test_history_store_appends_final_output_and_raw_text(tmp_path: Path) -> None
             "最终输出\n\n整理后的最终文本\n\n原文\n\nWhisper 原始识别文本",
         )
     ]
+
+
+def test_history_store_appends_mode_and_language_metadata(tmp_path: Path) -> None:
+    history_dir = tmp_path / "history"
+    store = HistoryStore(history_dir=history_dir)
+    day = datetime(2026, 5, 24, 16, 5, 0)
+
+    store.append(
+        "こんにちは",
+        raw_text="你好",
+        now=day,
+        usage_mode="translation",
+        asr_language="zh",
+        translation_output_language="ja",
+        debug_audio_path="/Users/test/.talky/debug-audio/sample.wav",
+    )
+
+    content = (history_dir / "2026-05-24.md").read_text(encoding="utf-8")
+    assert "模式: Translation" in content
+    assert "ASR 语言: zh" in content
+    assert "目标语言: ja" in content
+    assert "调试音频:" in content
+    assert "sample.wav" in content
+    assert "最终输出" in content
+    assert "原文" in content
+
+    entries = store.read_entries("2026-05-24")
+    assert entries[0][0] == "16:05:00"
+    assert "模式: Translation" in entries[0][1]

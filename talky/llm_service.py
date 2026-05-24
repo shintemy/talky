@@ -7,7 +7,11 @@ import urllib.request
 
 import ollama
 
-from talky.prompting import build_llm_system_prompt, build_selection_rewrite_prompt
+from talky.prompting import (
+    build_llm_system_prompt,
+    build_selection_rewrite_prompt,
+    build_translation_retry_user_text,
+)
 
 # Gemma 4 uses `<channel|>` as a thinking→answer separator inside `content`.
 # Other models may leak `<|think|>` or similar markers.
@@ -69,6 +73,8 @@ class OllamaTextCleaner:
         custom_vibe_template: str = "",
         translation_source_language: str = "zh",
         translation_output_language: str = "en",
+        *,
+        translation_strict_retry: bool = False,
     ) -> str:
         max_predict = 260 if usage_mode in {"vibecoding", "translation"} else 200
         system_prompt = build_llm_system_prompt(
@@ -79,10 +85,17 @@ class OllamaTextCleaner:
             translation_source_language=translation_source_language,
             translation_output_language=translation_output_language,
         )
+        user_content = raw_text
+        if usage_mode == "translation" and translation_strict_retry:
+            user_content = build_translation_retry_user_text(
+                raw_text,
+                target_language=translation_output_language,
+                source_language=translation_source_language,
+            )
         stream = self._chat_with_fallback(
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": raw_text},
+                {"role": "user", "content": user_content},
             ],
             think=False,
             stream=True,
@@ -112,6 +125,8 @@ class OllamaTextCleaner:
         final = _sanitize_llm_surface_text(final)
         if final:
             return final
+        if usage_mode == "translation":
+            return ""
         # Never surface model thinking as final content.
         # If content stream is empty, preserve the source transcript instead.
         return raw_text.strip()

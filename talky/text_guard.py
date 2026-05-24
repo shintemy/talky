@@ -4,6 +4,9 @@ import re
 
 _CJK_CHAR_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
 _LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
+_JA_KANA_RE = re.compile(r"[\u3040-\u309f\u30a0-\u30ff]")
+_KO_HANGUL_RE = re.compile(r"[\uac00-\ud7af]")
+_ZH_PARTICLE_CHARS = "的了了吗呢吧这那在是"
 
 
 def _segment_is_cjk_dominant(segment: str) -> bool:
@@ -87,6 +90,64 @@ def looks_like_unexpected_english_asr_output(text: str, *, language: str) -> boo
     if latin_count >= 12 and cjk_count <= 2:
         return True
     return latin_count >= 8 and cjk_count == 0
+
+
+def _compact_compare_text(text: str) -> str:
+    return re.sub(r"\s+", "", text)
+
+
+def translation_output_too_similar_to_source(output: str, source: str) -> bool:
+    out = _compact_compare_text(output)
+    src = _compact_compare_text(source)
+    if not out:
+        return True
+    if not src:
+        return False
+    if out == src:
+        return True
+    overlap = sum(1 for ch in out if ch in src)
+    longer = max(len(out), len(src))
+    return longer >= 4 and overlap / longer > 0.92
+
+
+def looks_like_wrong_translation_output(
+    output: str,
+    *,
+    target_language: str,
+    source_text: str,
+) -> bool:
+    """True when translation final text does not match configured target language."""
+    text = output.strip()
+    if not text:
+        return True
+    if translation_output_too_similar_to_source(text, source_text):
+        return True
+
+    target = (target_language or "").strip().lower()
+    cjk_count = len(_CJK_CHAR_RE.findall(text))
+    latin_count = len(_LATIN_LETTER_RE.findall(text))
+
+    if target == "ja":
+        if _JA_KANA_RE.search(text):
+            return False
+        if cjk_count == 0:
+            return True
+        zh_particles = sum(1 for ch in _ZH_PARTICLE_CHARS if ch in text)
+        return zh_particles >= 1
+
+    if target == "zh":
+        return cjk_count < 2
+
+    if target == "en":
+        return latin_count < 4 or cjk_count > latin_count
+
+    if target == "ko":
+        return len(_KO_HANGUL_RE.findall(text)) < 2
+
+    if target in {"fr", "de", "es", "ru", "ar"}:
+        return latin_count < 4 and cjk_count >= 4
+
+    return False
 
 
 def enforce_pronoun_consistency(source_text: str, output_text: str) -> str:

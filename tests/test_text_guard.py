@@ -3,6 +3,7 @@ from talky.text_guard import (
     enforce_pronoun_consistency,
     enforce_source_boundaries,
     looks_like_unexpected_english_asr_output,
+    looks_like_wrong_translation_output,
     strip_trailing_asr_translation_hallucination,
 )
 
@@ -71,6 +72,34 @@ def test_looks_like_unexpected_english_asr_output_allows_chinese() -> None:
     text = "唉,输出效果,输出效果,输出效果。 唉,改了好久。"
 
     assert looks_like_unexpected_english_asr_output(text, language="zh") is False
+
+
+def test_looks_like_wrong_translation_output_detects_untranslated_chinese() -> None:
+    source = "今天沅沅跟奶奶出去楼下玩。"
+    output = "今天沅沅跟奶奶出去楼下玩。"
+
+    assert (
+        looks_like_wrong_translation_output(
+            output,
+            target_language="ja",
+            source_text=source,
+        )
+        is True
+    )
+
+
+def test_looks_like_wrong_translation_output_accepts_japanese() -> None:
+    source = "今天沅沅跟奶奶出去楼下玩。"
+    output = "今日、沅沅はおばあちゃんと一緒に楼下で遊びに行きました。"
+
+    assert (
+        looks_like_wrong_translation_output(
+            output,
+            target_language="ja",
+            source_text=source,
+        )
+        is False
+    )
 
 
 def test_collapse_duplicate_output_repeated_lines() -> None:

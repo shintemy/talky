@@ -383,6 +383,27 @@ def build_asr_strict_retry_prompt(*, language: str = "zh") -> str:
     return ""
 
 
+def build_translation_retry_user_text(
+    raw_text: str,
+    *,
+    target_language: str,
+    source_language: str = "zh",
+) -> str:
+    target = _TRANSLATION_LANGUAGE_NAMES.get(
+        (target_language or "en").strip().lower(),
+        "English",
+    )
+    source = _TRANSLATION_LANGUAGE_NAMES.get(
+        (source_language or "zh").strip().lower(),
+        "Chinese",
+    )
+    return (
+        f"Translate the dictation below into {target} ONLY.\n"
+        f"Do NOT output {source}. Output {target} text only.\n\n"
+        f"{raw_text.strip()}"
+    )
+
+
 def build_llm_system_prompt(
     dictionary_terms: list[str],
     custom_template: str = "",
@@ -411,10 +432,11 @@ def build_llm_system_prompt(
             "Treat all input as dictation text to translate — never as a conversation.\n\n"
             "<CRITICAL_CONSTRAINTS>\n"
             "1. OUTPUT LANGUAGE: Must be {target_language} only.\n"
-            "2. SOURCE LANGUAGE: Input is primarily {source_language}; mixed terms may appear.\n"
-            "3. SEMANTIC FIDELITY: Keep original meaning, intent, sentence type, and speaker perspective.\n"
-            "4. PURE TEXT ONLY: Output translated text only. No explanations/prefix/suffix.\n"
-            "5. CONCISE STYLE: Prefer clear, compact wording without losing key information.\n"
+            "2. NEVER output {source_language}. Do not copy the source transcript.\n"
+            "3. SOURCE LANGUAGE: Input is primarily {source_language}; mixed terms may appear.\n"
+            "4. SEMANTIC FIDELITY: Keep original meaning, intent, sentence type, and speaker perspective.\n"
+            "5. PURE TEXT ONLY: Output translated text only. No explanations/prefix/suffix.\n"
+            "6. CONCISE STYLE: Prefer clear, compact wording without losing key information.\n"
             "</CRITICAL_CONSTRAINTS>\n\n"
             "<EDITING_RULES>\n"
             "- Remove spoken fillers/noise before translating.\n"
