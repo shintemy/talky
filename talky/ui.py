@@ -59,6 +59,7 @@ from talky.permissions import (
     check_input_monitoring_granted,
     check_microphone_granted,
     is_accessibility_trusted,
+    request_input_monitoring_permission,
     request_microphone_permission,
 )
 from talky.runtime_setup import ensure_local_whisper_runtime
@@ -102,6 +103,7 @@ _ZH = {
     "mic_permission": "麦克风权限",
     "input_monitoring_permission": "输入监控权限",
     "accessibility_permission": "辅助功能权限",
+    "input_monitoring_check": "检查输入监控",
     "granted": "已授权",
     "not_granted": "未授权",
     "request_mic_permission": "请求麦克风权限",
@@ -1676,6 +1678,11 @@ class ConfigsTab(QWidget):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         self.input_monitoring_status_value_label = QLabel("")
+        self.input_monitoring_button = QPushButton(
+            _tr(self._locale, "Check Input Monitoring", "input_monitoring_check")
+        )
+        self.input_monitoring_button.setObjectName("SecondaryButton")
+        self.input_monitoring_button.clicked.connect(self._check_input_monitoring)
 
         self.permission_button = QPushButton(
             _tr(self._locale, "Check Accessibility", "check_accessibility")
@@ -1746,6 +1753,7 @@ class ConfigsTab(QWidget):
         perm_grid.addWidget(self.permission_button, 1, 2)
         perm_grid.addWidget(self.input_monitoring_permission_label, 2, 0)
         perm_grid.addWidget(self.input_monitoring_status_value_label, 2, 1)
+        perm_grid.addWidget(self.input_monitoring_button, 2, 2)
 
         # ---- Assemble layout ----
         outer = QVBoxLayout(self)
@@ -1991,6 +1999,9 @@ class ConfigsTab(QWidget):
         )
         self.permission_button.setText(
             _tr(self._locale, "Check Accessibility", "check_accessibility")
+        )
+        self.input_monitoring_button.setText(
+            _tr(self._locale, "Check Input Monitoring", "input_monitoring_check")
         )
         self.request_mic_button.setText(
             _tr(self._locale, "Request Microphone Permission", "request_mic_permission")
@@ -2281,9 +2292,14 @@ class ConfigsTab(QWidget):
 
         self.request_mic_button.setVisible(not mic_ok)
         self.permission_button.setVisible(not ax_ok)
+        self.input_monitoring_button.setVisible(not input_ok)
 
     def _check_accessibility(self) -> None:
         is_accessibility_trusted(prompt=True)
+        self._refresh_permission_status()
+
+    def _check_input_monitoring(self) -> None:
+        request_input_monitoring_permission()
         self._refresh_permission_status()
 
     def _request_microphone_permission(self) -> None:
