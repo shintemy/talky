@@ -199,6 +199,19 @@ class AppController(QObject):
                 model_name=self.settings.whisper_model,
                 language=self.settings.language,
             )
+            return self._asr
+        # Defensive sync: if runtime settings changed but service rebuild was missed
+        # (e.g. UI save timing edge), always force ASR instance to match latest settings.
+        if (
+            getattr(self._asr, "model_name", "") != self.settings.whisper_model
+            or getattr(self._asr, "language", "") != self.settings.language
+        ):
+            from talky.asr_service import MlxWhisperASR
+
+            self._asr = MlxWhisperASR(
+                model_name=self.settings.whisper_model,
+                language=self.settings.language,
+            )
         return self._asr
 
     @pyqtSlot(str)

@@ -494,3 +494,15 @@ def test_debug_audio_saved_and_pruned_when_enabled(
     saved = sorted((tmp_path / ".talky" / "debug-audio").glob("*.wav"))
     assert len(saved) == 2
     assert all("mode_daily" in p.name for p in saved)
+
+
+def test_get_asr_rebuilds_when_language_drift_detected() -> None:
+    controller = _build_controller()
+    controller.settings.language = "zh"
+    first = controller._get_asr()
+    assert first.language == "zh"
+
+    controller.settings.language = "en"
+    second = controller._get_asr()
+    assert second.language == "en"
+    assert second is not first
