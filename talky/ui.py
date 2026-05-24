@@ -2723,7 +2723,10 @@ class SettingsWindow(QWidget):
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
-        if alert_if_local_ollama_unready(self.controller.config_store):
+        if alert_if_local_ollama_unready(
+            self.controller.config_store,
+            usage_mode=self.controller.settings.usage_mode,
+        ):
             self.controller.update_settings(self.controller.config_store.load())
         if check_input_monitoring_granted():
             self.controller.refresh_hotkey_listener()

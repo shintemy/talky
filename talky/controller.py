@@ -26,7 +26,7 @@ from talky.focus import FrontAppInfo, activate_app_by_pid, get_frontmost_app, ha
 from talky.hotkey import HoldToTalkHotkey
 from talky.history_store import HistoryStore
 from talky.llm_service import OllamaTextCleaner
-from talky.models import AppSettings
+from talky.models import AppSettings, SESSION_START_USAGE_MODE
 from talky.paster import ClipboardPaster
 from talky.permissions import check_ollama_reachable
 from talky.prompting import build_asr_initial_prompt, build_asr_strict_retry_prompt
@@ -143,6 +143,7 @@ class AppController(QObject):
         super().__init__()
         self.config_store = config_store
         self.settings = self.config_store.load()
+        self.settings.usage_mode = SESSION_START_USAGE_MODE
         self._apply_ollama_host_env()
 
         self.recorder = AudioRecorder(
@@ -290,11 +291,16 @@ class AppController(QObject):
 
     def update_dictionary(self, lines: list[str]) -> None:
         """Update just the dictionary portion of settings."""
-        settings = self.config_store.load()
+        settings = self._load_persisted_settings_preserving_session_mode()
         settings.custom_dictionary = lines
         self.config_store.save(settings)
         self.settings = settings
         self.settings_updated.emit(settings)
+
+    def _load_persisted_settings_preserving_session_mode(self) -> AppSettings:
+        settings = self.config_store.load()
+        settings.usage_mode = self.settings.usage_mode
+        return settings
 
     def update_custom_llm_prompt(self, prompt: str, *, emit_settings_updated: bool = True) -> None:
         """Persist prompt text without rebuilding recorder/LLM services."""

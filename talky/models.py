@@ -116,3 +116,13 @@ class AppSettings:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+SESSION_START_USAGE_MODE = "daily"
+
+
+def settings_for_disk(settings: AppSettings) -> AppSettings:
+    """Persist config without binding the next launch to an LLM usage mode."""
+    from dataclasses import replace
+
+    return replace(settings, usage_mode=SESSION_START_USAGE_MODE)

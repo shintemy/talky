@@ -332,7 +332,7 @@ def main() -> int:
     from talky.controller import AppController
     from talky.debug_log import append_debug_log
     from talky.error_report import install_exception_report_hooks
-    from talky.startup_gate import ensure_cloud_ready, ensure_local_ollama_ready, ensure_whisper_ready
+    from talky.startup_gate import ensure_whisper_ready
     from talky.ui import SettingsWindow, TrayApp
 
     app = QApplication(sys.argv)
@@ -364,17 +364,6 @@ def main() -> int:
 
     config_store = AppConfigStore(default_config_path())
     install_exception_report_hooks(settings_supplier=config_store.load)
-    settings = config_store.load()
-    usage_mode = settings.usage_mode
-
-    if usage_mode in {"vibecoding", "translation"}:
-        if settings.mode == "cloud":
-            if not ensure_cloud_ready(config_store):
-                return 1
-        else:
-            if not ensure_local_ollama_ready(config_store):
-                return 1
-
     if not ensure_whisper_ready(config_store):
         return 1
 
@@ -444,13 +433,13 @@ def main() -> int:
         from talky.onboarding import OllamaStatus, detect_system_locale, run_preflight_check
         from talky.startup_gate import apply_ollama_host_from_settings
 
-        s = config_store.load()
+        s = controller.settings
         if s.mode == "cloud":
             return
         if s.usage_mode not in {"vibecoding", "translation"}:
             return
         apply_ollama_host_from_settings(s)
-        if run_preflight_check() == OllamaStatus.READY:
+        if run_preflight_check(required_model=s.ollama_model) == OllamaStatus.READY:
             return
         activate_foreground_app()
         loc = detect_system_locale()

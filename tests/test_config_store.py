@@ -65,6 +65,36 @@ def test_load_migrates_legacy_builtin_prompt_snapshot(tmp_path: Path) -> None:
     assert saved.get("custom_llm_prompt", None) == ""
 
 
+def test_save_always_persists_daily_usage_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.json"
+    store = AppConfigStore(config_path)
+
+    settings = store.load()
+    settings.usage_mode = "translation"
+    store.save(settings)
+
+    on_disk = json.loads(config_path.read_text(encoding="utf-8"))
+    reloaded = store.load()
+
+    assert on_disk["usage_mode"] == "daily"
+    assert reloaded.usage_mode == "daily"
+
+
+def test_load_migrates_persisted_usage_mode_to_daily(tmp_path: Path) -> None:
+    config_path = tmp_path / "settings.json"
+    config_path.write_text(
+        json.dumps({"usage_mode": "translation", "hotkey": "fn"}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    store = AppConfigStore(config_path)
+
+    loaded = store.load()
+    on_disk = json.loads(config_path.read_text(encoding="utf-8"))
+
+    assert loaded.usage_mode == "daily"
+    assert on_disk["usage_mode"] == "daily"
+
+
 def test_load_keeps_real_custom_prompt_untouched(tmp_path: Path) -> None:
     config_path = tmp_path / "settings.json"
     custom_prompt = "Team custom prompt"

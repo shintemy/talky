@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from talky.models import AppSettings
+from talky.models import AppSettings, SESSION_START_USAGE_MODE, settings_for_disk
 
 
 class AppConfigStore:
@@ -24,11 +24,19 @@ class AppConfigStore:
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+        raw_usage_mode = str(data.get("usage_mode", SESSION_START_USAGE_MODE)).strip().lower()
+        if raw_usage_mode and raw_usage_mode != SESSION_START_USAGE_MODE:
+            data["usage_mode"] = SESSION_START_USAGE_MODE
+            self.config_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            settings.usage_mode = SESSION_START_USAGE_MODE
         return settings
 
     def save(self, settings: AppSettings) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.config_path.write_text(
-            json.dumps(settings.to_dict(), ensure_ascii=False, indent=2),
+            json.dumps(settings_for_disk(settings).to_dict(), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )

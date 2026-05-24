@@ -121,7 +121,11 @@ def _try_open_local_ollama_app() -> None:
         pass
 
 
-def alert_if_local_ollama_unready(config_store: AppConfigStore) -> bool:
+def alert_if_local_ollama_unready(
+    config_store: AppConfigStore,
+    *,
+    usage_mode: str | None = None,
+) -> bool:
     """When opening Settings in local mode, warn if Ollama is not usable.
 
     Startup only checks once; this covers later changes (Ollama stopped, wrong host, etc.).
@@ -131,7 +135,8 @@ def alert_if_local_ollama_unready(config_store: AppConfigStore) -> bool:
     settings = config_store.load()
     if settings.mode not in {"local", "remote"}:
         return False
-    if not _usage_mode_requires_llm(settings.usage_mode):
+    effective_mode = (usage_mode or settings.usage_mode).strip().lower()
+    if not _usage_mode_requires_llm(effective_mode):
         return False
 
     apply_ollama_host_from_settings(settings)

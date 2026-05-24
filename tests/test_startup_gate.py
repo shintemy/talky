@@ -70,14 +70,15 @@ def test_alert_local_skips_when_ollama_ready(tmp_path):
         assert alert_if_local_ollama_unready(store) is False
 
 
-def test_ensure_local_existing_user_missing_bound_model_enters_returning_prompt(tmp_path):
+def test_ensure_local_existing_user_missing_bound_model_enters_returning_prompt(tmp_path, monkeypatch):
     from talky.startup_gate import ensure_local_ollama_ready
 
     store = AppConfigStore(tmp_path / "settings.json")
     settings = store.load()
     settings.usage_mode = "vibecoding"
     settings.ollama_model = "qwen3.5:9b"
-    store.save(settings)
+    store.config_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(store, "load", lambda: settings)
 
     with (
         patch(
@@ -128,3 +129,38 @@ def test_alert_if_local_ollama_unready_skips_daily_mode(tmp_path):
         assert alert_if_local_ollama_unready(store) is False
 
     mock_preflight.assert_not_called()
+
+
+def test_alert_if_local_ollama_unready_uses_runtime_usage_mode_override(tmp_path):
+    from talky.startup_gate import alert_if_local_ollama_unready
+
+    store = AppConfigStore(tmp_path / "settings.json")
+    settings = store.load()
+    settings.usage_mode = "daily"
+    store.save(settings)
+
+    with patch(
+        "talky.startup_gate.run_preflight_check",
+        return_value=OllamaStatus.READY,
+    ) as mock_preflight:
+        assert alert_if_local_ollama_unready(store, usage_mode="translation") is False
+
+    mock_preflight.assert_called_once()
+
+
+def test_controller_resets_usage_mode_to_daily_on_startup():
+    from talky.controller import AppController
+    from talky.models import AppSettings
+
+    settings = AppSettings(usage_mode="translation", ollama_model="qwen3.5:4b")
+
+    class _FakeConfigStore:
+        def load(self) -> AppSettings:
+            return settings
+
+        def save(self, updated: AppSettings) -> None:
+            settings.__dict__.update(updated.__dict__)
+
+    controller = AppController(_FakeConfigStore())
+
+    assert controller.settings.usage_mode == "daily"
