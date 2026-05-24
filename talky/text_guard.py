@@ -1,5 +1,93 @@
 from __future__ import annotations
 
+import re
+
+_CJK_CHAR_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+_LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
+
+
+def _segment_is_cjk_dominant(segment: str) -> bool:
+    cjk = _CJK_CHAR_RE.findall(segment)
+    latin = _LATIN_LETTER_RE.findall(segment)
+    if not cjk:
+        return False
+    if not latin:
+        return True
+    return len(cjk) >= len(latin)
+
+
+def _segment_is_latin_only(segment: str) -> bool:
+    if _CJK_CHAR_RE.search(segment):
+        return False
+    return bool(_LATIN_LETTER_RE.search(segment))
+
+
+def strip_trailing_asr_translation_hallucination(text: str, language: str) -> str:
+    """Drop trailing English-only sentences after Chinese speech (Whisper ASR artifact)."""
+    lang = (language or "").strip().lower()
+    if lang not in {"zh", "ja", "ko"}:
+        return text
+
+    stripped = text.strip()
+    if not stripped:
+        return text
+
+    parts = re.split(r"([。！？!?\.]+)", stripped)
+    sentences: list[tuple[str, str]] = []
+    idx = 0
+    while idx < len(parts):
+        chunk = parts[idx].strip()
+        delim = parts[idx + 1] if idx + 1 < len(parts) else ""
+        if chunk:
+            sentences.append((chunk, delim))
+        elif delim and sentences:
+            prev_chunk, prev_delim = sentences[-1]
+            sentences[-1] = (prev_chunk, prev_delim + delim)
+        idx += 2 if idx + 1 < len(parts) else 1
+
+    if not sentences:
+        return text
+
+    first_latin_only_idx: int | None = None
+    seen_cjk_dominant = False
+    for sentence_idx, (chunk, _delim) in enumerate(sentences):
+        if _segment_is_cjk_dominant(chunk):
+            seen_cjk_dominant = True
+            continue
+        if seen_cjk_dominant and _segment_is_latin_only(chunk):
+            first_latin_only_idx = sentence_idx
+            break
+
+    if first_latin_only_idx is None:
+        return text
+
+    for chunk, _delim in sentences[first_latin_only_idx:]:
+        if chunk and not _segment_is_latin_only(chunk):
+            return text
+
+    kept = [chunk + delim for chunk, delim in sentences[:first_latin_only_idx]]
+    result = "".join(kept).strip()
+    return result or text
+
+
+def looks_like_unexpected_english_asr_output(text: str, *, language: str) -> bool:
+    """Detect zh-configured ASR returning mostly English (language drift / wrong decode)."""
+    lang = (language or "").strip().lower()
+    if lang != "zh":
+        return False
+
+    stripped = text.strip()
+    if not stripped:
+        return False
+
+    cjk_count = len(_CJK_CHAR_RE.findall(stripped))
+    latin_count = len(_LATIN_LETTER_RE.findall(stripped))
+    if cjk_count >= 6:
+        return False
+    if latin_count >= 12 and cjk_count <= 2:
+        return True
+    return latin_count >= 8 and cjk_count == 0
+
 
 def enforce_pronoun_consistency(source_text: str, output_text: str) -> str:
     """

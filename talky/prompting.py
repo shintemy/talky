@@ -354,15 +354,33 @@ def _format_dictionary(dictionary_terms: list[str]) -> str:
     return ", ".join(cleaned) if cleaned else "(empty)"
 
 
-def build_asr_initial_prompt(dictionary_terms: list[str]) -> str:
+def build_asr_initial_prompt(
+    dictionary_terms: list[str],
+    *,
+    language: str = "zh",
+) -> str:
     dictionary_text = _format_dictionary(dictionary_terms)
+    lang = (language or "zh").strip().lower()
+    if lang == "zh":
+        return (
+            "以下是普通话口述内容的忠实转写。"
+            "只输出中文，不要翻译成英文，不要追加英文句子。"
+            "口语中夹杂的英文术语可保留原文。"
+            f"优先词：{dictionary_text}。"
+        )
     return (
-        "Faithful dictation transcription. The speaker may mix Mandarin Chinese with "
-        "English words or short phrases; transcribe both exactly as spoken. "
+        "Faithful dictation transcription. Transcribe exactly as spoken. "
         "Do not translate, summarize, or add commentary. "
         "High-priority terms (prefer when spoken): "
         f"{dictionary_text}."
     )
+
+
+def build_asr_strict_retry_prompt(*, language: str = "zh") -> str:
+    lang = (language or "zh").strip().lower()
+    if lang == "zh":
+        return "以下是中文口述。"
+    return ""
 
 
 def build_llm_system_prompt(

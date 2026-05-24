@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import signal
 import sys
+import time
 from types import SimpleNamespace
 
 
@@ -145,7 +146,7 @@ def test_duplicate_launch_does_not_notify_show_settings(monkeypatch) -> None:
     main_module = importlib.import_module("main")
 
     called = {"notify": 0}
-    monkeypatch.setattr(main_module, "try_acquire_single_instance_lock", lambda: False)
+    monkeypatch.setattr(main_module, "try_acquire_single_instance_lock_with_retry", lambda: False)
     monkeypatch.setattr(
         main_module,
         "notify_running_instance_show_settings",
@@ -197,3 +198,55 @@ def test_input_monitoring_refresh_waits_for_real_permission(monkeypatch) -> None
 
     assert requests == ["requested"]
     assert refresh_calls == ["refresh"]
+
+
+def test_release_single_instance_lock_closes_fd(monkeypatch, tmp_path) -> None:
+    fake_qtwidgets = SimpleNamespace(QApplication=type("FakeQApplication", (), {}))
+    fake_pyqt6 = SimpleNamespace(QtWidgets=fake_qtwidgets)
+    monkeypatch.setitem(sys.modules, "PyQt6", fake_pyqt6)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", fake_qtwidgets)
+    sys.modules.pop("main", None)
+    main_module = importlib.import_module("main")
+
+    lock_path = tmp_path / "talky.lock"
+    monkeypatch.setattr(main_module, "single_instance_lock_path", lambda: lock_path)
+
+    closed: list[int] = []
+
+    fd_value = 42
+    monkeypatch.setattr(main_module.os, "open", lambda *args, **kwargs: fd_value)
+    monkeypatch.setattr(main_module.os, "ftruncate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_module.os, "write", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_module.fcntl, "flock", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main_module.os, "close", lambda fd: closed.append(fd))
+
+    assert main_module.try_acquire_single_instance_lock() is True
+    main_module.release_single_instance_lock()
+    assert closed == [fd_value]
+    assert main_module._SINGLE_INSTANCE_LOCK_FD is None
+
+
+def test_try_acquire_with_retry_recovers_stale_lock(monkeypatch, tmp_path) -> None:
+    fake_qtwidgets = SimpleNamespace(QApplication=type("FakeQApplication", (), {}))
+    fake_pyqt6 = SimpleNamespace(QtWidgets=fake_qtwidgets)
+    monkeypatch.setitem(sys.modules, "PyQt6", fake_pyqt6)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", fake_qtwidgets)
+    sys.modules.pop("main", None)
+    main_module = importlib.import_module("main")
+
+    lock_path = tmp_path / "talky.lock"
+    lock_path.write_text("99999", encoding="utf-8")
+    monkeypatch.setattr(main_module, "single_instance_lock_path", lambda: lock_path)
+    monkeypatch.setattr(main_module, "_is_process_alive", lambda pid: False)
+
+    attempts = {"count": 0}
+
+    def fake_try_acquire() -> bool:
+        attempts["count"] += 1
+        return attempts["count"] >= 2
+
+    monkeypatch.setattr(main_module, "try_acquire_single_instance_lock", fake_try_acquire)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+    assert main_module.try_acquire_single_instance_lock_with_retry(retries=3) is True
+    assert attempts["count"] == 2

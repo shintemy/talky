@@ -264,6 +264,15 @@ def _restart_command() -> list[str]:
     return [sys.executable, *args]
 
 
+def _release_single_instance_lock() -> None:
+    try:
+        import main
+
+        main.release_single_instance_lock()
+    except Exception:
+        pass
+
+
 def _restart_current_process(reason: str) -> bool:
     """Restart process robustly across source run and bundled app run.
 
@@ -280,9 +289,9 @@ def _restart_current_process(reason: str) -> bool:
         try:
             app_bundle = _find_app_bundle_path()
             if app_bundle:
-                launch_cmd = f"sleep 0.5; open {shlex.quote(str(app_bundle))}"
+                launch_cmd = f"sleep 1.5; open {shlex.quote(str(app_bundle))}"
             else:
-                launch_cmd = f"sleep 0.5; {shlex.join(cmd)}"
+                launch_cmd = f"sleep 1.5; {shlex.join(cmd)}"
             subprocess.Popen(  # noqa: S603
                 ["/bin/sh", "-c", launch_cmd],
                 close_fds=True,
@@ -1534,6 +1543,8 @@ class ConfigsTab(QWidget):
         self._form_labels: list[tuple[QLabel, str, str]] = []
         self._is_loading_settings = False
         self._pending_auto_save = False
+        self._last_input_monitoring_ok: bool | None = None
+        self._last_accessibility_ok: bool | None = None
 
         # ---- Processing Mode ----
         self._mode_combo = StyledComboBox()
@@ -2434,6 +2445,13 @@ class ConfigsTab(QWidget):
         input_ok = check_input_monitoring_granted()
         ax_ok = is_accessibility_trusted(prompt=False)
 
+        if self._last_input_monitoring_ok is False and input_ok:
+            self.controller.refresh_hotkey_listener()
+        if self._last_accessibility_ok is False and ax_ok:
+            self.controller.refresh_hotkey_listener()
+        self._last_input_monitoring_ok = input_ok
+        self._last_accessibility_ok = ax_ok
+
         granted_text = _tr(self._locale, "Granted", "granted")
         denied_text = _tr(self._locale, "Not Granted", "not_granted")
         ok_style = "color: #34C759; font-weight: 600; font-size: 12px;"
@@ -2462,10 +2480,20 @@ class ConfigsTab(QWidget):
     def _check_accessibility(self) -> None:
         is_accessibility_trusted(prompt=True)
         self._refresh_permission_status()
+        self._schedule_permission_poll()
 
     def _check_input_monitoring(self) -> None:
         request_input_monitoring_permission()
         self._refresh_permission_status()
+        self._schedule_permission_poll()
+
+    def _schedule_permission_poll(self, attempt: int = 0) -> None:
+        if check_input_monitoring_granted() and is_accessibility_trusted(prompt=False):
+            self._refresh_permission_status()
+            return
+        if attempt >= 40:
+            return
+        QTimer.singleShot(1500, lambda: self._schedule_permission_poll(attempt + 1))
 
     def _request_microphone_permission(self) -> None:
         granted, detail = request_microphone_permission()
@@ -2572,6 +2600,7 @@ class ConfigsTab(QWidget):
         except Exception:
             pass
         if _restart_current_process("settings_reset"):
+            _release_single_instance_lock()
             QApplication.quit()
             return
         QMessageBox.warning(
@@ -2696,6 +2725,8 @@ class SettingsWindow(QWidget):
         super().showEvent(event)
         if alert_if_local_ollama_unready(self.controller.config_store):
             self.controller.update_settings(self.controller.config_store.load())
+        if check_input_monitoring_granted():
+            self.controller.refresh_hotkey_listener()
         self._configs_tab._refresh_permission_status()  # noqa: SLF001
         self.setWindowOpacity(0.0)
         anim = QPropertyAnimation(self, b"windowOpacity")
@@ -2876,6 +2907,7 @@ class TrayApp:
         self.live_status_widget.hide()
         self.controller.stop()
         self.tray.hide()
+        _release_single_instance_lock()
         QApplication.quit()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
@@ -2979,6 +3011,7 @@ class TrayApp:
         self.live_status_widget.hide()
         self.controller.stop()
         self.tray.hide()
+        _release_single_instance_lock()
         if _restart_current_process("model_configured"):
             QApplication.quit()
             return

@@ -29,7 +29,7 @@ from talky.llm_service import OllamaTextCleaner
 from talky.models import AppSettings
 from talky.paster import ClipboardPaster
 from talky.permissions import check_ollama_reachable
-from talky.prompting import build_asr_initial_prompt
+from talky.prompting import build_asr_initial_prompt, build_asr_strict_retry_prompt
 from talky.processing_guard import (
     estimate_asr_timeout_seconds,
     estimate_processing_timeout_seconds,
@@ -43,6 +43,8 @@ from talky.text_guard import (
     collapse_duplicate_output,
     enforce_pronoun_consistency,
     enforce_source_boundaries,
+    strip_trailing_asr_translation_hallucination,
+    looks_like_unexpected_english_asr_output,
 )
 from talky.wake_guard import (
     normalize_wake_guard_threshold,
@@ -720,6 +722,41 @@ class AppController(QObject):
         final_text = normalize_to_simplified_chinese(final_text)
         return final_text
 
+    def _transcribe_with_language_guard(
+        self,
+        wav_path: Path,
+        *,
+        asr_prompt: str,
+        asr_timeout_s: float,
+    ) -> str:
+        asr_start = time.perf_counter()
+        raw_text = run_with_timeout(
+            lambda: self._get_asr().transcribe(wav_path, initial_prompt=asr_prompt),
+            asr_timeout_s,
+            label="ASR step",
+        )
+        if looks_like_unexpected_english_asr_output(
+            raw_text,
+            language=self.settings.language,
+        ):
+            append_debug_log(
+                "ASR language drift suspected: "
+                f"lang={self.settings.language!r}; preview={raw_text[:120]!r}; retrying once"
+            )
+            self._asr = None
+            retry_prompt = build_asr_strict_retry_prompt(language=self.settings.language)
+            raw_text = run_with_timeout(
+                lambda: self._get_asr().transcribe(wav_path, initial_prompt=retry_prompt),
+                asr_timeout_s,
+                label="ASR retry step",
+            )
+        asr_elapsed = time.perf_counter() - asr_start
+        print(f"[Talky] ASR elapsed: {asr_elapsed:.2f}s")
+        append_debug_log(
+            f"ASR result: lang={self.settings.language!r}; preview={raw_text[:120]!r}"
+        )
+        return raw_text
+
     def _process_local(
         self,
         wav_path: Path,
@@ -730,15 +767,15 @@ class AppController(QObject):
         dictionary_entries = parse_dictionary_entries(self.settings.custom_dictionary)
         dict_terms = extract_terms(dictionary_entries)
         person_terms = extract_person_terms(dictionary_entries)
-        asr_prompt = build_asr_initial_prompt(dict_terms)
-        asr_start = time.perf_counter()
-        raw_text = run_with_timeout(
-            lambda: self._get_asr().transcribe(wav_path, initial_prompt=asr_prompt),
-            asr_timeout_s,
-            label="ASR step",
+        asr_prompt = build_asr_initial_prompt(
+            dict_terms,
+            language=self.settings.language,
         )
-        asr_elapsed = time.perf_counter() - asr_start
-        print(f"[Talky] ASR elapsed: {asr_elapsed:.2f}s")
+        raw_text = self._transcribe_with_language_guard(
+            wav_path,
+            asr_prompt=asr_prompt,
+            asr_timeout_s=asr_timeout_s,
+        )
         if not raw_text:
             raise RuntimeError("ASR returned empty text. Please retry.")
         corrected_raw_text = apply_phonetic_dictionary(raw_text, dict_terms)
@@ -751,7 +788,11 @@ class AppController(QObject):
             )
 
         if self.settings.usage_mode == "daily":
-            daily_text = normalize_to_simplified_chinese(corrected_raw_text)
+            daily_text = strip_trailing_asr_translation_hallucination(
+                corrected_raw_text,
+                self.settings.language,
+            )
+            daily_text = normalize_to_simplified_chinese(daily_text)
             daily_text = collapse_duplicate_output(daily_text)
             return ProcessingResult(final_text=daily_text, raw_text=raw_text)
 
@@ -976,29 +1017,38 @@ class AppController(QObject):
     def _warm_up_models_async(self) -> None:
         if self.is_cloud_mode:
             return
+        if should_warm_up_asr():
+            from talky.asr_service import mark_asr_warm_up_pending
+
+            mark_asr_warm_up_pending()
         worker = threading.Thread(target=self._warm_up_models, daemon=True)
         worker.start()
 
     def _warm_up_models(self) -> None:
-        if should_warm_up_asr():
-            try:
-                warm_asr_start = time.perf_counter()
-                self._get_asr().warm_up()
-                warm_asr_elapsed = time.perf_counter() - warm_asr_start
-                print(f"[Talky] Whisper warm-up done: {warm_asr_elapsed:.2f}s")
-            except Exception as exc:
-                print(f"[Talky] Whisper warm-up failed: {exc}")
-        else:
-            append_debug_log("Whisper warm-up skipped at startup (TALKY_ASR_WARMUP not enabled).")
-
-        if not self._usage_mode_requires_llm(self.settings.usage_mode):
-            append_debug_log("LLM warm-up skipped at startup (usage mode does not need LLM).")
-            return
-
         try:
-            warm_llm_start = time.perf_counter()
-            self.llm.warm_up()
-            warm_llm_elapsed = time.perf_counter() - warm_llm_start
-            print(f"[Talky] Ollama warm-up done: {warm_llm_elapsed:.2f}s")
-        except Exception as exc:
-            print(f"[Talky][debug] Ollama warm-up skipped: {exc}")
+            if should_warm_up_asr():
+                try:
+                    warm_asr_start = time.perf_counter()
+                    self._get_asr().warm_up()
+                    warm_asr_elapsed = time.perf_counter() - warm_asr_start
+                    print(f"[Talky] Whisper warm-up done: {warm_asr_elapsed:.2f}s")
+                except Exception as exc:
+                    print(f"[Talky] Whisper warm-up failed: {exc}")
+            else:
+                append_debug_log("Whisper warm-up skipped at startup (TALKY_ASR_WARMUP not enabled).")
+
+            if not self._usage_mode_requires_llm(self.settings.usage_mode):
+                append_debug_log("LLM warm-up skipped at startup (usage mode does not need LLM).")
+                return
+
+            try:
+                warm_llm_start = time.perf_counter()
+                self.llm.warm_up()
+                warm_llm_elapsed = time.perf_counter() - warm_llm_start
+                print(f"[Talky] Ollama warm-up done: {warm_llm_elapsed:.2f}s")
+            except Exception as exc:
+                print(f"[Talky][debug] Ollama warm-up skipped: {exc}")
+        finally:
+            from talky.asr_service import mark_asr_warm_up_complete
+
+            mark_asr_warm_up_complete()

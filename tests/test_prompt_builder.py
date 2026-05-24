@@ -14,13 +14,21 @@ from talky.prompting import (
 def test_build_asr_prompt_contains_dictionary_terms() -> None:
     dictionary = ["MLX", "Qwen", "Alice Chen"]
 
-    prompt = build_asr_initial_prompt(dictionary)
+    prompt = build_asr_initial_prompt(dictionary, language="zh")
 
     assert "MLX" in prompt
     assert "Qwen" in prompt
     assert "Alice Chen" in prompt
-    assert "Mandarin" in prompt or "Chinese" in prompt
-    assert "English" in prompt
+    assert "中文" in prompt
+    assert "英文" in prompt
+
+
+def test_build_asr_prompt_english_mode_is_neutral() -> None:
+    prompt = build_asr_initial_prompt(["Foo"], language="en")
+
+    assert "Foo" in prompt
+    assert "Do not translate" in prompt
+    assert "Chinese" not in prompt
 
 
 def test_build_llm_prompt_includes_required_rules() -> None:

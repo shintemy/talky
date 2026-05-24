@@ -9,7 +9,11 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
-from talky.macos_ui import activate_foreground_app, install_dock_reopen_handler
+from talky.macos_ui import (
+    activate_foreground_app,
+    install_app_became_active_handler,
+    install_dock_reopen_handler,
+)
 from talky.permissions import (
     check_input_monitoring_granted,
     check_microphone_granted,
@@ -22,6 +26,44 @@ _SIGNAL_PUMP_TIMER = None
 _PENDING_EXIT_SIGNAL: int | None = None
 _EXIT_REQUESTED = False
 _SINGLE_INSTANCE_LOCK_FD: int | None = None
+
+
+def _read_lock_holder_pid() -> int | None:
+    try:
+        text = single_instance_lock_path().read_text(encoding="utf-8").strip()
+        return int(text) if text.isdigit() else None
+    except Exception:
+        return None
+
+
+def _is_process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+
+
+def release_single_instance_lock() -> None:
+    global _SINGLE_INSTANCE_LOCK_FD
+    fd = _SINGLE_INSTANCE_LOCK_FD
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        os.close(fd)
+    except Exception:
+        pass
+    _SINGLE_INSTANCE_LOCK_FD = None
 
 
 def _run_packaged_import_self_check() -> int | None:
@@ -124,6 +166,28 @@ def try_acquire_single_instance_lock() -> bool:
     global _SINGLE_INSTANCE_LOCK_FD
     _SINGLE_INSTANCE_LOCK_FD = fd
     return True
+
+
+def try_acquire_single_instance_lock_with_retry(
+    *,
+    retries: int = 20,
+    delay_s: float = 0.2,
+) -> bool:
+    """Acquire lock, retrying briefly when holder PID is stale (restart race)."""
+    if try_acquire_single_instance_lock():
+        return True
+
+    holder = _read_lock_holder_pid()
+    if holder is not None and _is_process_alive(holder):
+        return False
+
+    import time
+
+    for _ in range(retries):
+        time.sleep(delay_s)
+        if try_acquire_single_instance_lock():
+            return True
+    return False
 
 
 def _force_exit_after_timeout(signum: int) -> None:
@@ -260,7 +324,7 @@ def main() -> int:
     if check_result is not None:
         return check_result
 
-    if not try_acquire_single_instance_lock():
+    if not try_acquire_single_instance_lock_with_retry():
         print("Talky is already running. Skip duplicate launch.", file=sys.stderr)
         return 0
 
@@ -320,6 +384,28 @@ def main() -> int:
     install_signal_handlers(tray_app=tray_app, controller=controller)
     install_dock_reopen_handler(tray_app.show_settings)
 
+    _permission_snapshot = {
+        "im": check_input_monitoring_granted(),
+        "ax": is_accessibility_trusted(prompt=False),
+    }
+
+    def _on_app_became_active() -> None:
+        im = check_input_monitoring_granted()
+        ax = is_accessibility_trusted(prompt=False)
+        prev_im = _permission_snapshot["im"]
+        prev_ax = _permission_snapshot["ax"]
+        if (prev_im is False and im) or (prev_ax is False and ax):
+            controller.refresh_hotkey_listener()
+        _permission_snapshot["im"] = im
+        _permission_snapshot["ax"] = ax
+        try:
+            if settings_window.isVisible():
+                settings_window._configs_tab._refresh_permission_status()  # noqa: SLF001
+        except Exception:
+            pass
+
+    install_app_became_active_handler(_on_app_became_active)
+
     def _cleanup_on_quit() -> None:
         """Kill child processes so macOS doesn't think the app is still alive."""
         import multiprocessing
@@ -342,6 +428,7 @@ def main() -> int:
                 os.kill(tracker_pid, _signal.SIGTERM)
         except Exception:
             pass
+        release_single_instance_lock()
         os._exit(0)
 
     app.aboutToQuit.connect(_cleanup_on_quit)

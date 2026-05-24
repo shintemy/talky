@@ -447,6 +447,56 @@ def test_process_local_daily_mode_normalizes_to_simplified(
     assert result.raw_text == "我應該發現一個bug。"
 
 
+def test_process_local_daily_mode_strips_trailing_english_translation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller.settings.usage_mode = "daily"
+    controller.settings.language = "zh"
+
+    monkeypatch.setattr(
+        controller,
+        "_get_asr",
+        lambda: SimpleNamespace(
+            transcribe=lambda *_args, **_kwargs: (
+                "来我来说一段话你看一下。Let me say a sentence. Take a look."
+            ),
+        ),
+    )
+
+    result = controller._process_local(Path("/tmp/input.wav"), asr_timeout_s=3.0)
+
+    assert result.final_text == "来我来说一段话你看一下。"
+    assert "Let me say" in result.raw_text
+
+
+def test_process_local_retries_when_asr_drifts_to_english(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller.settings.usage_mode = "daily"
+    controller.settings.language = "zh"
+    calls: list[str] = []
+
+    def fake_transcribe(_wav_path, initial_prompt: str) -> str:
+        calls.append(initial_prompt)
+        if len(calls) == 1:
+            return "This should be ok, my Chinese output this time is ok"
+        return "这次应该没问题，我的中文输出这次是对的"
+
+    monkeypatch.setattr(
+        controller,
+        "_get_asr",
+        lambda: SimpleNamespace(transcribe=fake_transcribe),
+    )
+
+    result = controller._process_local(Path("/tmp/input.wav"), asr_timeout_s=3.0)
+
+    assert len(calls) == 2
+    assert "中文口述" in calls[1]
+    assert "这次应该没问题" in result.final_text
+
+
 def test_process_local_rejects_repetitive_asr_hallucination(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

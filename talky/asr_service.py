@@ -1,9 +1,26 @@
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 from talky.runtime_setup import ensure_local_whisper_runtime
+
+_TRANSCRIBE_LOCK = threading.Lock()
+_WARMUP_READY = threading.Event()
+_WARMUP_READY.set()
+
+
+def mark_asr_warm_up_pending() -> None:
+    _WARMUP_READY.clear()
+
+
+def mark_asr_warm_up_complete() -> None:
+    _WARMUP_READY.set()
+
+
+def reset_asr_runtime_gates_for_tests() -> None:
+    _WARMUP_READY.set()
 
 
 def _prepend_talky_extra_site_packages() -> None:
@@ -80,37 +97,56 @@ class MlxWhisperASR:
         )
 
     def transcribe(self, audio_path: Path, initial_prompt: str) -> str:
-        mlx_whisper, _ = self._load_runtime(require_numpy=False)
-        audio = self._load_audio_waveform(audio_path)
-
-        model_ref = self._resolve_model_reference()
-        kwargs = {"initial_prompt": initial_prompt, "language": self.language}
-        try:
-            result = mlx_whisper.transcribe(
-                audio,
-                path_or_hf_repo=model_ref,
-                **kwargs,
+        _WARMUP_READY.wait(timeout=180)
+        with _TRANSCRIBE_LOCK:
+            mlx_whisper, _ = self._load_runtime(require_numpy=False)
+            audio = self._load_audio_waveform(audio_path)
+            model_ref = self._resolve_model_reference()
+            kwargs = self._build_transcribe_kwargs(
+                initial_prompt=initial_prompt,
+                language=self.language,
             )
-        except TypeError:
-            result = mlx_whisper.transcribe(audio, model_ref, **kwargs)
-        text = result.get("text", "") if isinstance(result, dict) else str(result)
-        return text.strip()
+            try:
+                result = mlx_whisper.transcribe(
+                    audio,
+                    path_or_hf_repo=model_ref,
+                    **kwargs,
+                )
+            except TypeError:
+                result = mlx_whisper.transcribe(audio, model_ref, **kwargs)
+            text = result.get("text", "") if isinstance(result, dict) else str(result)
+            return text.strip()
+
+    @staticmethod
+    def _build_transcribe_kwargs(*, initial_prompt: str, language: str | None = None) -> dict:
+        kwargs = {
+            "initial_prompt": initial_prompt,
+            "language": language,
+            "task": "transcribe",
+            "condition_on_previous_text": False,
+            "temperature": (0.0,),
+        }
+        return {key: value for key, value in kwargs.items() if value is not None}
 
     def warm_up(self) -> None:
-        mlx_whisper, np = self._load_runtime(require_numpy=True)
+        with _TRANSCRIBE_LOCK:
+            mlx_whisper, np = self._load_runtime(require_numpy=True)
 
-        model_ref = self._resolve_model_reference()
-        # Use in-memory silent waveform to avoid depending on ffmpeg for warm-up.
-        silent = np.zeros(8000, dtype=np.float32)  # 0.5s @ 16k
-        kwargs = {"initial_prompt": "", "language": self.language}
-        try:
-            mlx_whisper.transcribe(
-                silent,
-                path_or_hf_repo=model_ref,
-                **kwargs,
+            model_ref = self._resolve_model_reference()
+            # Use in-memory silent waveform to avoid depending on ffmpeg for warm-up.
+            silent = np.zeros(8000, dtype=np.float32)  # 0.5s @ 16k
+            kwargs = self._build_transcribe_kwargs(
+                initial_prompt="",
+                language=self.language,
             )
-        except TypeError:
-            mlx_whisper.transcribe(silent, model_ref, **kwargs)
+            try:
+                mlx_whisper.transcribe(
+                    silent,
+                    path_or_hf_repo=model_ref,
+                    **kwargs,
+                )
+            except TypeError:
+                mlx_whisper.transcribe(silent, model_ref, **kwargs)
 
     def _load_runtime(self, *, require_numpy: bool) -> tuple[object, object | None]:
         """Load local Whisper runtime; auto-bootstrap ~/.talky/extra-site-packages once."""

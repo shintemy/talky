@@ -6,6 +6,7 @@ import sys
 from typing import Any, Callable
 
 _DOCK_REOPEN_DELEGATE = None
+_APP_ACTIVE_OBSERVER = None
 
 
 def activate_foreground_app() -> None:
@@ -104,3 +105,22 @@ def install_dock_reopen_handler(on_reopen: Callable[[], None]) -> None:
     global _DOCK_REOPEN_DELEGATE
     _DOCK_REOPEN_DELEGATE = delegate
     app.setDelegate_(delegate)
+
+
+def install_app_became_active_handler(on_active: Callable[[], None]) -> None:
+    """Invoke callback when the app becomes active (e.g. returning from System Settings)."""
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSApplicationDidBecomeActiveNotification
+        from Foundation import NSNotificationCenter, NSOperationQueue
+    except Exception:
+        return
+
+    global _APP_ACTIVE_OBSERVER
+    _APP_ACTIVE_OBSERVER = NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(  # noqa: E501
+        NSApplicationDidBecomeActiveNotification,
+        None,
+        NSOperationQueue.mainQueue(),
+        lambda _note: on_active(),
+    )

@@ -2,6 +2,8 @@ from talky.text_guard import (
     collapse_duplicate_output,
     enforce_pronoun_consistency,
     enforce_source_boundaries,
+    looks_like_unexpected_english_asr_output,
+    strip_trailing_asr_translation_hallucination,
 )
 
 
@@ -30,6 +32,45 @@ def test_enforce_pronoun_consistency_you_not_to_me() -> None:
     corrected = enforce_pronoun_consistency(source, output)
 
     assert corrected == "\u4f60\u6765\u64cd\u4f5c"
+
+
+def test_strip_trailing_asr_translation_hallucination_removes_english_tail() -> None:
+    text = "来我来说一段话你看一下。Let me say a sentence. Take a look."
+
+    cleaned = strip_trailing_asr_translation_hallucination(text, "zh")
+
+    assert cleaned == "来我来说一段话你看一下。"
+
+
+def test_strip_trailing_asr_translation_hallucination_keeps_inline_mixed_terms() -> None:
+    text = "今天 meeting 讨论一下 API 设计。"
+
+    cleaned = strip_trailing_asr_translation_hallucination(text, "zh")
+
+    assert cleaned == text
+
+
+def test_strip_trailing_asr_translation_hallucination_ignores_english_only() -> None:
+    text = "Let me say a sentence. Take a look."
+
+    cleaned = strip_trailing_asr_translation_hallucination(text, "zh")
+
+    assert cleaned == text
+
+
+def test_looks_like_unexpected_english_asr_output_detects_drift() -> None:
+    text = (
+        "This time it's OK. I haven't seen any English output for the time being. "
+        "I'm talking about daily mode."
+    )
+
+    assert looks_like_unexpected_english_asr_output(text, language="zh") is True
+
+
+def test_looks_like_unexpected_english_asr_output_allows_chinese() -> None:
+    text = "唉,输出效果,输出效果,输出效果。 唉,改了好久。"
+
+    assert looks_like_unexpected_english_asr_output(text, language="zh") is False
 
 
 def test_collapse_duplicate_output_repeated_lines() -> None:

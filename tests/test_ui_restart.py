@@ -77,6 +77,7 @@ def test_bundled_app_restart_uses_open_via_launchservices():
     script = shell_cmd[2]
     assert "open" in script
     assert "Talky.app" in script
+    assert "sleep 1.5" in script
 
 
 def test_find_app_bundle_path():
