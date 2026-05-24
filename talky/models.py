@@ -61,6 +61,8 @@ class AppSettings:
     custom_vibe_prompt: str = ""
     usage_mode: str = "daily"  # "daily" | "vibecoding" | "translation"
     translation_output_language: str = "en"
+    debug_audio_enabled: bool = False
+    debug_audio_max_files: int = 20
     direct_whisper_output: bool = False
     wake_guard_gap_threshold_s: float = 20.0
     wake_guard_rebuild_count: int = 0
@@ -74,6 +76,8 @@ class AppSettings:
         custom_vibe = str(data.get("custom_vibe_prompt", "")).strip()
         if should_follow_latest_default_prompt(custom_vibe):
             custom_vibe = ""
+        debug_audio_max_files = int(data.get("debug_audio_max_files", 20))
+        debug_audio_max_files = max(1, min(debug_audio_max_files, 500))
         return cls(
             custom_dictionary=list(data.get("custom_dictionary", [])),
             hotkey=str(data.get("hotkey", "fn")),
@@ -100,6 +104,8 @@ class AppSettings:
             custom_vibe_prompt=custom_vibe,
             usage_mode=str(data.get("usage_mode", "daily")),
             translation_output_language=str(data.get("translation_output_language", "en")),
+            debug_audio_enabled=bool(data.get("debug_audio_enabled", False)),
+            debug_audio_max_files=debug_audio_max_files,
             direct_whisper_output=bool(data.get("direct_whisper_output", False)),
             wake_guard_gap_threshold_s=float(data.get("wake_guard_gap_threshold_s", 20.0)),
             wake_guard_rebuild_count=int(data.get("wake_guard_rebuild_count", 0)),

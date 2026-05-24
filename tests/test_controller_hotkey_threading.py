@@ -464,3 +464,33 @@ def test_process_local_rejects_repetitive_asr_hallucination(
 
     with pytest.raises(RuntimeError, match="ASR output appears unstable"):
         controller._process_local(Path("/tmp/input.wav"), asr_timeout_s=3.0)
+
+
+def test_debug_audio_saved_and_pruned_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    controller = _build_controller()
+    controller.settings.debug_audio_enabled = True
+    controller.settings.debug_audio_max_files = 2
+    controller.settings.usage_mode = "daily"
+    controller.settings.language = "zh"
+
+    monkeypatch.setattr(controller_module.Path, "home", lambda: tmp_path)
+
+    src1 = tmp_path / "src1.wav"
+    src2 = tmp_path / "src2.wav"
+    src3 = tmp_path / "src3.wav"
+    src1.write_bytes(b"wav1")
+    src2.write_bytes(b"wav2")
+    src3.write_bytes(b"wav3")
+
+    controller._persist_debug_audio_if_enabled(src1)
+    time.sleep(0.01)
+    controller._persist_debug_audio_if_enabled(src2)
+    time.sleep(0.01)
+    controller._persist_debug_audio_if_enabled(src3)
+
+    saved = sorted((tmp_path / ".talky" / "debug-audio").glob("*.wav"))
+    assert len(saved) == 2
+    assert all("mode_daily" in p.name for p in saved)

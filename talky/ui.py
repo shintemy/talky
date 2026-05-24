@@ -171,6 +171,10 @@ _ZH = {
     "text_output": "文本处理与输出",
     "app_preferences": "应用偏好",
     "target_language": "目标语言",
+    "save_debug_audio": "保存调试录音",
+    "debug_audio_max_files": "调试录音保留条数",
+    "off": "关闭",
+    "on": "开启",
     "translation_output_language": "翻译输出语言",
     "ollama_model_placeholder": "请先启动 Ollama 以加载模型",
     "llm_mode_requires_ollama_title": "需要 Ollama",
@@ -1662,6 +1666,27 @@ class ConfigsTab(QWidget):
             lambda _idx: self._schedule_quiet_auto_save()
         )
 
+        self.debug_audio_enabled_combo = StyledComboBox()
+        self.debug_audio_enabled_combo.addItem(
+            _tr(self._locale, "Off", "off"),
+            userData=False,
+        )
+        self.debug_audio_enabled_combo.addItem(
+            _tr(self._locale, "On", "on"),
+            userData=True,
+        )
+        self.debug_audio_enabled_combo.currentIndexChanged.connect(
+            lambda _idx: (self._update_debug_audio_visibility(), self._schedule_quiet_auto_save())
+        )
+
+        self.debug_audio_max_files_spin = QSpinBox()
+        self.debug_audio_max_files_spin.setRange(1, 500)
+        self.debug_audio_max_files_spin.setValue(20)
+        self.debug_audio_max_files_spin.setSingleStep(5)
+        self.debug_audio_max_files_spin.valueChanged.connect(
+            lambda _value: self._schedule_quiet_auto_save()
+        )
+
         # ---- Permission widgets ----
         self.mic_permission_label = QLabel(
             _tr(self._locale, "Microphone", "mic_permission")
@@ -1765,7 +1790,11 @@ class ConfigsTab(QWidget):
         app_form = _new_form_grid()
         _append_fields(
             app_form,
-            [("UI Language", "ui_language", self.ui_locale_combo)],
+            [
+                ("UI Language", "ui_language", self.ui_locale_combo),
+                ("Save Debug Audio", "save_debug_audio", self.debug_audio_enabled_combo),
+                ("Debug Audio Retention", "debug_audio_max_files", self.debug_audio_max_files_spin),
+            ],
         )
 
         # ---- Permission grid ----
@@ -1994,6 +2023,12 @@ class ConfigsTab(QWidget):
 
         locale_idx = self.ui_locale_combo.findData(settings.ui_locale)
         self.ui_locale_combo.setCurrentIndex(0 if locale_idx < 0 else locale_idx)
+        debug_audio_idx = self.debug_audio_enabled_combo.findData(
+            bool(settings.debug_audio_enabled)
+        )
+        self.debug_audio_enabled_combo.setCurrentIndex(0 if debug_audio_idx < 0 else debug_audio_idx)
+        self.debug_audio_max_files_spin.setValue(int(settings.debug_audio_max_files))
+        self._update_debug_audio_visibility()
         self._refresh_permission_status()
         self._is_loading_settings = False
 
@@ -2026,6 +2061,8 @@ class ConfigsTab(QWidget):
             ),
             "ollama_model": self.ollama_model_combo.currentText().strip() or recommended_model_name(),
             "ui_locale": str(self.ui_locale_combo.currentData()),
+            "debug_audio_enabled": bool(self.debug_audio_enabled_combo.currentData()),
+            "debug_audio_max_files": int(self.debug_audio_max_files_spin.value()),
             "auto_paste_delay_ms": 120,
             "llm_debug_stream": False,
         }
@@ -2087,6 +2124,12 @@ class ConfigsTab(QWidget):
         )
         self.ui_locale_combo.setItemText(
             1, _tr(self._locale, "Chinese", "ui_option_chinese")
+        )
+        self.debug_audio_enabled_combo.setItemText(
+            0, _tr(self._locale, "Off", "off")
+        )
+        self.debug_audio_enabled_combo.setItemText(
+            1, _tr(self._locale, "On", "on")
         )
         for label, en_text, key in self._form_labels:
             label.setText(_tr(self._locale, en_text, key))
@@ -2266,6 +2309,15 @@ class ConfigsTab(QWidget):
                     label.setVisible(is_llm_mode and not is_cloud)
                 else:
                     label.setVisible(show_asr_section)
+        self._update_debug_audio_visibility()
+
+    def _update_debug_audio_visibility(self) -> None:
+        enabled = bool(self.debug_audio_enabled_combo.currentData())
+        self.debug_audio_max_files_spin.setVisible(enabled)
+        for label, _en, key in self._form_labels:
+            if key == "debug_audio_max_files":
+                label.setVisible(enabled)
+                break
 
     def _validate_mode_ready(
         self,
@@ -2473,6 +2525,8 @@ class ConfigsTab(QWidget):
             ollama_model=selected_model,
             ollama_host=selected_host,
             ui_locale=collected["ui_locale"],
+            debug_audio_enabled=bool(collected.get("debug_audio_enabled", False)),
+            debug_audio_max_files=int(collected.get("debug_audio_max_files", 20)),
             language=collected["language"],
             auto_paste_delay_ms=collected["auto_paste_delay_ms"],
             llm_debug_stream=collected["llm_debug_stream"],

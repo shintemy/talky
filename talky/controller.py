@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import os
 import re
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -842,6 +844,7 @@ class AppController(QObject):
                 f"overall_timeout={self._processing_timeout_s:.1f}s"
             )
             self._processing_wav_path = wav_path
+            self._persist_debug_audio_if_enabled(wav_path)
 
             selected_text_snapshot = ""
             if has_focus:
@@ -905,6 +908,31 @@ class AppController(QObject):
                     wav_path.unlink(missing_ok=True)
                 except Exception:
                     pass
+
+    def _persist_debug_audio_if_enabled(self, source_wav: Path) -> None:
+        if not self.settings.debug_audio_enabled:
+            return
+        try:
+            output_dir = Path.home() / ".talky" / "debug-audio"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+            target = output_dir / (
+                f"{ts}-mode_{self.settings.usage_mode}-asr_{self.settings.language}.wav"
+            )
+            shutil.copy2(source_wav, target)
+
+            max_files = max(1, min(int(self.settings.debug_audio_max_files), 500))
+            wav_files = sorted(
+                output_dir.glob("*.wav"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            for stale in wav_files[max_files:]:
+                stale.unlink(missing_ok=True)
+
+            append_debug_log(f"debug audio saved: {target}")
+        except Exception as exc:
+            append_debug_log(f"debug audio save failed: {exc}")
 
     def _emit_pipeline_state(self, state: str, *, source: str) -> None:
         previous = self._last_pipeline_state
