@@ -163,6 +163,14 @@ _ZH = {
     "usage_mode_daily": "Daily",
     "usage_mode_vibecoding": "Vibecoding",
     "usage_mode_translation": "Translation",
+    "usage_mode_hint_daily": "仅语音转写，快速稳定，不依赖 LLM。",
+    "usage_mode_hint_vibecoding": "将口述整理为精炼英文技术表达（依赖 LLM）。",
+    "usage_mode_hint_translation": "按 ASR 语言识别后翻译到目标语言（依赖 LLM）。",
+    "recording_access": "录音入口",
+    "speech_recognition": "语音识别",
+    "text_output": "文本处理与输出",
+    "app_preferences": "应用偏好",
+    "target_language": "目标语言",
     "translation_output_language": "翻译输出语言",
     "ollama_model_placeholder": "请先启动 Ollama 以加载模型",
     "llm_mode_requires_ollama_title": "需要 Ollama",
@@ -1684,41 +1692,66 @@ class ConfigsTab(QWidget):
         self.request_mic_button.setObjectName("SecondaryButton")
         self.request_mic_button.clicked.connect(self._request_microphone_permission)
 
-        # ---- Form grid (right-aligned labels) ----
-        form = QGridLayout()
-        form.setColumnMinimumWidth(0, 120)
-        form.setColumnStretch(0, 0)
-        form.setColumnStretch(1, 1)
-        form.setHorizontalSpacing(16)
-        form.setVerticalSpacing(12)
+        # ---- Form grids (task-oriented grouping) ----
+        def _new_form_grid() -> QGridLayout:
+            grid = QGridLayout()
+            grid.setColumnMinimumWidth(0, 120)
+            grid.setColumnStretch(0, 0)
+            grid.setColumnStretch(1, 1)
+            grid.setHorizontalSpacing(16)
+            grid.setVerticalSpacing(12)
+            return grid
 
-        fields = [
-            ("Processing Mode", "processing_mode", self._mode_combo),
-            ("Cloud API URL", "cloud_api_url", self._cloud_url_input),
-            ("Cloud API Key", "cloud_api_key", self._cloud_key_input),
-            ("Record Hotkey", "hotkey", self.hotkey_widget),
-            ("Whisper Model", "whisper_model", self.whisper_model_combo),
-            ("ASR Language", "asr_language", self.language_combo),
-            (
-                "Translation Output Language",
-                "translation_output_language",
-                self.translation_output_language_combo,
-            ),
-            ("Ollama Host", "ollama_host", self.ollama_host_input),
-            ("Ollama Model", "ollama_model", self.ollama_model_combo),
-            ("UI Language", "ui_language", self.ui_locale_combo),
-        ]
-        for row_idx, (en_text, key, widget) in enumerate(fields):
-            label = QLabel(_tr(self._locale, en_text, key))
-            label.setObjectName("FormLabel")
-            v_align = (
-                Qt.AlignmentFlag.AlignTop if key in ("hotkey",)
-                else Qt.AlignmentFlag.AlignVCenter
-            )
-            label.setAlignment(Qt.AlignmentFlag.AlignRight | v_align)
-            form.addWidget(label, row_idx, 0)
-            form.addWidget(widget, row_idx, 1)
-            self._form_labels.append((label, en_text, key))
+        def _append_fields(
+            grid: QGridLayout,
+            fields: list[tuple[str, str, QWidget]],
+        ) -> None:
+            for en_text, key, widget in fields:
+                row_idx = grid.rowCount()
+                label = QLabel(_tr(self._locale, en_text, key))
+                label.setObjectName("FormLabel")
+                v_align = (
+                    Qt.AlignmentFlag.AlignTop if key in ("hotkey",)
+                    else Qt.AlignmentFlag.AlignVCenter
+                )
+                label.setAlignment(Qt.AlignmentFlag.AlignRight | v_align)
+                grid.addWidget(label, row_idx, 0)
+                grid.addWidget(widget, row_idx, 1)
+                self._form_labels.append((label, en_text, key))
+
+        recording_form = _new_form_grid()
+        _append_fields(
+            recording_form,
+            [("Record Hotkey", "hotkey", self.hotkey_widget)],
+        )
+
+        asr_form = _new_form_grid()
+        _append_fields(
+            asr_form,
+            [
+                ("Whisper Model", "whisper_model", self.whisper_model_combo),
+                ("ASR Language", "asr_language", self.language_combo),
+            ],
+        )
+
+        text_output_form = _new_form_grid()
+        _append_fields(
+            text_output_form,
+            [
+                ("Processing Mode", "processing_mode", self._mode_combo),
+                ("Cloud API URL", "cloud_api_url", self._cloud_url_input),
+                ("Cloud API Key", "cloud_api_key", self._cloud_key_input),
+                ("Target Language", "target_language", self.translation_output_language_combo),
+                ("Ollama Host", "ollama_host", self.ollama_host_input),
+                ("Ollama Model", "ollama_model", self.ollama_model_combo),
+            ],
+        )
+
+        app_form = _new_form_grid()
+        _append_fields(
+            app_form,
+            [("UI Language", "ui_language", self.ui_locale_combo)],
+        )
 
         # ---- Permission grid ----
         perm_grid = QGridLayout()
@@ -1801,32 +1834,67 @@ class ConfigsTab(QWidget):
         us_layout.addLayout(usage_row)
         content_layout.addWidget(usage_section)
 
-        # ---- Base Parameters section ----
-        params_section = QFrame()
-        params_section.setObjectName("SectionFrame")
-        ps_layout = QVBoxLayout(params_section)
-        ps_layout.setContentsMargins(16, 14, 16, 14)
-        ps_layout.setSpacing(10)
-        self._params_card_title = QLabel(
-            _tr(self._locale, "Base Parameters", "base_params")
-        )
-        self._params_card_title.setObjectName("CardTitle")
-        ps_layout.addWidget(self._params_card_title)
-        ps_layout.addLayout(form)
-        content_layout.addWidget(params_section)
+        self._usage_mode_hint = QLabel("")
+        self._usage_mode_hint.setObjectName("WindowSubtitle")
+        us_layout.addWidget(self._usage_mode_hint)
 
-        perm_section = QFrame()
-        perm_section.setObjectName("SectionFrame")
-        pm_layout = QVBoxLayout(perm_section)
-        pm_layout.setContentsMargins(16, 14, 16, 14)
-        pm_layout.setSpacing(10)
-        self._perm_title = QLabel(
+        self._recording_section = QFrame()
+        self._recording_section.setObjectName("SectionFrame")
+        rs_layout = QVBoxLayout(self._recording_section)
+        rs_layout.setContentsMargins(16, 14, 16, 14)
+        rs_layout.setSpacing(10)
+        self._recording_card_title = QLabel(
+            _tr(self._locale, "Recording Access", "recording_access")
+        )
+        self._recording_card_title.setObjectName("CardTitle")
+        rs_layout.addWidget(self._recording_card_title)
+        rs_layout.addLayout(recording_form)
+        self._recording_permissions_title = QLabel(
             _tr(self._locale, "Permission Status", "permission_status")
         )
-        self._perm_title.setObjectName("CardTitle")
-        pm_layout.addWidget(self._perm_title)
-        pm_layout.addLayout(perm_grid)
-        content_layout.addWidget(perm_section)
+        self._recording_permissions_title.setObjectName("WindowSubtitle")
+        rs_layout.addWidget(self._recording_permissions_title)
+        rs_layout.addLayout(perm_grid)
+        content_layout.addWidget(self._recording_section)
+
+        self._asr_section = QFrame()
+        self._asr_section.setObjectName("SectionFrame")
+        asr_layout = QVBoxLayout(self._asr_section)
+        asr_layout.setContentsMargins(16, 14, 16, 14)
+        asr_layout.setSpacing(10)
+        self._asr_card_title = QLabel(
+            _tr(self._locale, "Speech Recognition", "speech_recognition")
+        )
+        self._asr_card_title.setObjectName("CardTitle")
+        asr_layout.addWidget(self._asr_card_title)
+        asr_layout.addLayout(asr_form)
+        content_layout.addWidget(self._asr_section)
+
+        self._text_output_section = QFrame()
+        self._text_output_section.setObjectName("SectionFrame")
+        to_layout = QVBoxLayout(self._text_output_section)
+        to_layout.setContentsMargins(16, 14, 16, 14)
+        to_layout.setSpacing(10)
+        self._text_output_card_title = QLabel(
+            _tr(self._locale, "Text Output", "text_output")
+        )
+        self._text_output_card_title.setObjectName("CardTitle")
+        to_layout.addWidget(self._text_output_card_title)
+        to_layout.addLayout(text_output_form)
+        content_layout.addWidget(self._text_output_section)
+
+        self._app_section = QFrame()
+        self._app_section.setObjectName("SectionFrame")
+        app_layout = QVBoxLayout(self._app_section)
+        app_layout.setContentsMargins(16, 14, 16, 14)
+        app_layout.setSpacing(10)
+        self._app_card_title = QLabel(
+            _tr(self._locale, "App Preferences", "app_preferences")
+        )
+        self._app_card_title.setObjectName("CardTitle")
+        app_layout.addWidget(self._app_card_title)
+        app_layout.addLayout(app_form)
+        content_layout.addWidget(self._app_section)
 
         content_layout.addStretch()
 
@@ -1850,6 +1918,7 @@ class ConfigsTab(QWidget):
         scroll.setWidget(content)
         outer.addWidget(scroll)
 
+        self._refresh_usage_mode_hint()
         self._apply_hotkey_control_state()
 
     # -- Load / Collect --
@@ -1867,6 +1936,7 @@ class ConfigsTab(QWidget):
         usage_btn = self._usage_mode_group.button(usage_btn_id)
         if usage_btn:
             usage_btn.setChecked(True)
+        self._refresh_usage_mode_hint()
 
         mode_idx = self._mode_combo.findData(settings.mode)
         self._mode_combo.setCurrentIndex(0 if mode_idx < 0 else mode_idx)
@@ -1956,11 +2026,20 @@ class ConfigsTab(QWidget):
         self._usage_mode_group.button(2).setText(
             _tr(self._locale, "Translation", "usage_mode_translation")
         )
-        self._params_card_title.setText(
-            _tr(self._locale, "Base Parameters", "base_params")
+        self._recording_card_title.setText(
+            _tr(self._locale, "Recording Access", "recording_access")
         )
-        self._perm_title.setText(
+        self._recording_permissions_title.setText(
             _tr(self._locale, "Permission Status", "permission_status")
+        )
+        self._asr_card_title.setText(
+            _tr(self._locale, "Speech Recognition", "speech_recognition")
+        )
+        self._text_output_card_title.setText(
+            _tr(self._locale, "Text Output", "text_output")
+        )
+        self._app_card_title.setText(
+            _tr(self._locale, "App Preferences", "app_preferences")
         )
         self.mic_permission_label.setText(
             _tr(self._locale, "Microphone", "mic_permission")
@@ -1994,6 +2073,7 @@ class ConfigsTab(QWidget):
         )
         for label, en_text, key in self._form_labels:
             label.setText(_tr(self._locale, en_text, key))
+        self._refresh_usage_mode_hint()
         self._refresh_custom_hotkey_preview()
 
     def _populate_ollama_models(self, host: str = "", *, preferred_model: str = "") -> None:
@@ -2044,6 +2124,7 @@ class ConfigsTab(QWidget):
     def _on_usage_mode_changed(self, _button_id: int) -> None:
         if not self._ensure_llm_mode_ready_or_revert():
             return
+        self._refresh_usage_mode_hint()
         self._update_mode_field_visibility()
         mode = str(self._mode_combo.currentData())
         if mode != "cloud" and self._is_llm_mode_active():
@@ -2059,6 +2140,28 @@ class ConfigsTab(QWidget):
         btn = self._usage_mode_group.button(usage_btn_id)
         if btn:
             btn.setChecked(True)
+
+    def _refresh_usage_mode_hint(self) -> None:
+        checked_id = self._usage_mode_group.checkedId()
+        if checked_id == 1:
+            hint = _tr(
+                self._locale,
+                "Clean dictation into concise technical English using LLM.",
+                "usage_mode_hint_vibecoding",
+            )
+        elif checked_id == 2:
+            hint = _tr(
+                self._locale,
+                "Recognize with ASR Language, then translate to target language using LLM.",
+                "usage_mode_hint_translation",
+            )
+        else:
+            hint = _tr(
+                self._locale,
+                "Whisper-only fast dictation output with no LLM dependency.",
+                "usage_mode_hint_daily",
+            )
+        self._usage_mode_hint.setText(hint)
 
     def _ensure_llm_mode_ready_or_revert(self) -> bool:
         mode = str(self._mode_combo.currentData())
@@ -2117,22 +2220,25 @@ class ConfigsTab(QWidget):
         is_remote = mode == "remote"
         is_llm_mode = self._is_llm_mode_active()
         is_translation_mode = self._is_translation_mode_active()
+        show_asr_section = not (is_cloud and is_llm_mode)
 
         self._mode_combo.setVisible(is_llm_mode)
         self._cloud_url_input.setVisible(is_llm_mode and is_cloud)
         self._cloud_key_input.setVisible(is_llm_mode and is_cloud)
-        self.whisper_model_combo.setVisible(not is_cloud or not is_llm_mode)
-        self.language_combo.setVisible(not is_cloud or not is_llm_mode)
+        self.whisper_model_combo.setVisible(show_asr_section)
+        self.language_combo.setVisible(show_asr_section)
         self.translation_output_language_combo.setVisible(is_translation_mode)
         self.ollama_host_input.setVisible(is_llm_mode and is_remote)
         self.ollama_model_combo.setVisible(is_llm_mode and not is_cloud)
+        self._asr_section.setVisible(show_asr_section)
+        self._text_output_section.setVisible(is_llm_mode)
 
         for label, _en, key in self._form_labels:
             if key == "processing_mode":
                 label.setVisible(is_llm_mode)
             elif key in ("cloud_api_url", "cloud_api_key"):
                 label.setVisible(is_llm_mode and is_cloud)
-            elif key in ("translation_output_language",):
+            elif key in ("target_language",):
                 label.setVisible(is_translation_mode)
             elif key == "ollama_host":
                 label.setVisible(is_llm_mode and is_remote)
@@ -2140,7 +2246,7 @@ class ConfigsTab(QWidget):
                 if key == "ollama_model":
                     label.setVisible(is_llm_mode and not is_cloud)
                 else:
-                    label.setVisible(not is_cloud or not is_llm_mode)
+                    label.setVisible(show_asr_section)
 
     def _validate_mode_ready(
         self,
