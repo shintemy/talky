@@ -65,6 +65,7 @@ from talky.permissions import (
 from talky.runtime_setup import ensure_local_whisper_runtime
 from talky.debug_log import append_debug_log
 from talky.error_report import append_error_report
+from talky.feature_flags import debug_ui_enabled
 from talky.version_checker import CURRENT_VERSION, VersionChecker
 
 # ---------------------------------------------------------------------------
@@ -1799,14 +1800,21 @@ class ConfigsTab(QWidget):
         )
 
         app_form = _new_form_grid()
-        _append_fields(
-            app_form,
-            [
-                ("UI Language", "ui_language", self.ui_locale_combo),
-                ("Save Debug Audio", "save_debug_audio", self.debug_audio_enabled_combo),
-                ("Debug Audio Retention", "debug_audio_max_files", self.debug_audio_max_files_spin),
-            ],
-        )
+        app_fields: list[tuple[str, str, QWidget]] = [
+            ("UI Language", "ui_language", self.ui_locale_combo),
+        ]
+        if debug_ui_enabled():
+            app_fields.extend(
+                [
+                    ("Save Debug Audio", "save_debug_audio", self.debug_audio_enabled_combo),
+                    (
+                        "Debug Audio Retention",
+                        "debug_audio_max_files",
+                        self.debug_audio_max_files_spin,
+                    ),
+                ]
+            )
+        _append_fields(app_form, app_fields)
 
         # ---- Permission grid ----
         perm_grid = QGridLayout()
@@ -2072,8 +2080,16 @@ class ConfigsTab(QWidget):
             ),
             "ollama_model": self.ollama_model_combo.currentText().strip() or recommended_model_name(),
             "ui_locale": str(self.ui_locale_combo.currentData()),
-            "debug_audio_enabled": bool(self.debug_audio_enabled_combo.currentData()),
-            "debug_audio_max_files": int(self.debug_audio_max_files_spin.value()),
+            "debug_audio_enabled": (
+                bool(self.debug_audio_enabled_combo.currentData())
+                if debug_ui_enabled()
+                else False
+            ),
+            "debug_audio_max_files": (
+                int(self.debug_audio_max_files_spin.value())
+                if debug_ui_enabled()
+                else int(self.controller.settings.debug_audio_max_files)
+            ),
             "auto_paste_delay_ms": 120,
             "llm_debug_stream": False,
         }
@@ -2323,6 +2339,10 @@ class ConfigsTab(QWidget):
         self._update_debug_audio_visibility()
 
     def _update_debug_audio_visibility(self) -> None:
+        if not debug_ui_enabled():
+            self.debug_audio_enabled_combo.setVisible(False)
+            self.debug_audio_max_files_spin.setVisible(False)
+            return
         enabled = bool(self.debug_audio_enabled_combo.currentData())
         self.debug_audio_max_files_spin.setVisible(enabled)
         for label, _en, key in self._form_labels:

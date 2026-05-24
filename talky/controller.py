@@ -1024,7 +1024,9 @@ class AppController(QObject):
                     pass
 
     def _persist_debug_audio_if_enabled(self, source_wav: Path) -> Path | None:
-        if not self.settings.debug_audio_enabled:
+        from talky.feature_flags import debug_ui_enabled
+
+        if not debug_ui_enabled() or not self.settings.debug_audio_enabled:
             return None
         try:
             output_dir = Path.home() / ".talky" / "debug-audio"

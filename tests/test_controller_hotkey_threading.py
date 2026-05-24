@@ -546,6 +546,23 @@ def test_debug_audio_saved_and_pruned_when_enabled(
     assert all("mode_daily" in p.name for p in saved)
 
 
+def test_debug_audio_skipped_when_debug_ui_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import talky.feature_flags as feature_flags
+
+    controller = _build_controller()
+    controller.settings.debug_audio_enabled = True
+    feature_flags.debug_ui_enabled.cache_clear()
+    monkeypatch.setattr(feature_flags, "debug_ui_enabled", lambda: False)
+
+    src = tmp_path / "src.wav"
+    src.write_bytes(b"wav")
+
+    assert controller._persist_debug_audio_if_enabled(src) is None
+
+
 def test_get_asr_rebuilds_when_language_drift_detected() -> None:
     controller = _build_controller()
     controller.settings.language = "zh"

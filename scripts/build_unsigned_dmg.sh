@@ -43,6 +43,7 @@ TMP_DMG_PATH="$BUILD_DIR/${APP_NAME}-tmp.dmg"
 # By default, dmg_stage is copied to /tmp/.../dmg_stage (ASCII); set TALKY_DMG_SKIP_TMP_HDIUTIL=1 for in-repo path.
 # Set TALKY_HDIUTIL_VERBOSE=1 for hdiutil -verbose.
 # Set TALKY_BUILD_ID_OVERRIDE=... to replace the default build_id (6 chars A–Z a–z 0–9).
+# Set TALKY_DEBUG_BUILD=1 to embed TalkyDebugBuild in Info.plist (shows Save Debug Audio in Dashboard).
 
 echo "==> Building unsigned DMG for ${APP_NAME}"
 echo "==> Version: ${VERSION}"
@@ -150,6 +151,11 @@ if [[ -f "$APP_PLIST" ]]; then
     || /usr/libexec/PlistBuddy -c "Add :NSSupportsSuddenTermination bool false" "$APP_PLIST"
   /usr/libexec/PlistBuddy -c "Set :TalkyBuildId $BUILD_ID" "$APP_PLIST" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :TalkyBuildId string $BUILD_ID" "$APP_PLIST"
+  if [[ "${TALKY_DEBUG_BUILD:-}" == "1" ]]; then
+    echo "==> Debug build: enabling internal dashboard controls (TalkyDebugBuild)..."
+    /usr/libexec/PlistBuddy -c "Set :TalkyDebugBuild true" "$APP_PLIST" 2>/dev/null \
+      || /usr/libexec/PlistBuddy -c "Add :TalkyDebugBuild bool true" "$APP_PLIST"
+  fi
 fi
 
 echo "==> Creating entitlements for audio-input access..."
