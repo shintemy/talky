@@ -1,4 +1,4 @@
-from talky.dictionary_entries import extract_person_terms, extract_terms, parse_dictionary_entries
+from talky.dictionary_entries import extract_person_terms, extract_terms, match_dictionary_tags, parse_dictionary_entries
 
 
 def test_parse_dictionary_entries_supports_person_label() -> None:
@@ -6,9 +6,6 @@ def test_parse_dictionary_entries_supports_person_label() -> None:
 
     assert extract_terms(entries) == ["Tom", "TensorRT", "Alice"]
     assert extract_person_terms(entries) == ["Tom", "Alice"]
-
-
-from talky.dictionary_entries import match_dictionary_tags, parse_dictionary_entries
 
 
 def test_match_dictionary_tags_splits_person_and_term() -> None:
@@ -34,3 +31,9 @@ def test_match_dictionary_tags_dedupes_and_keeps_dictionary_order() -> None:
     persons, terms = match_dictionary_tags("张三 用 Redis 又 Redis", entries)
     assert persons == ["张三"]
     assert terms == ["Redis"]
+
+
+def test_match_dictionary_tags_ascii_special_char_terms() -> None:
+    entries = parse_dictionary_entries(["C++", "C#"])
+    _persons, terms = match_dictionary_tags("I write C++ and C# code", entries)
+    assert terms == ["C++", "C#"]

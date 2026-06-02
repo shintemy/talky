@@ -55,13 +55,13 @@ def _parse_line(line: str) -> DictionaryEntry | None:
     return DictionaryEntry(term=line, kind="term")
 
 
-_CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿]")
+_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 
 def _term_appears(term: str, text: str) -> bool:
     if _CJK_RE.search(term):
         return term in text
-    return re.search(rf"\b{re.escape(term)}\b", text, re.IGNORECASE) is not None
+    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.IGNORECASE) is not None
 
 
 def match_dictionary_tags(
