@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from talky.history_store import StructuredHistoryEntry
+from talky.task_timeout import run_with_timeout
 
 
 def previous_iso_week_range(today: date) -> tuple[date, date]:
@@ -165,3 +166,83 @@ def render_summary_markdown(
         parts.append("")
         parts.append(summary.strip())
     return "\n".join(parts) + "\n"
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def run_weekly_summary(
+    *,
+    today: date,
+    summaries_dir: Path,
+    read_structured: Callable[[str], list[StructuredHistoryEntry]],
+    summarize: Callable[[str, str], str],
+    is_ready: Callable[[], bool],
+    should_abort: Callable[[], bool],
+    ui_locale: str,
+    model_name: str,
+    now_text: str,
+    log: Callable[[str], None] = lambda _msg: None,
+    day_timeout_s: float = 60.0,
+    reduce_timeout_s: float = 90.0,
+) -> Path | None:
+    """Generate last week's summary markdown. Return path, or None when skipped."""
+    start, end = previous_iso_week_range(today)
+    target = summary_path(summaries_dir, start, end)
+
+    if is_week_summarized(summaries_dir, start, end):
+        return None
+    if not is_ready():
+        log("weekly summary skipped: LLM not ready")
+        return None
+
+    days = collect_week_outputs(read_structured, start, end)
+    if not days:
+        log("weekly summary skipped: no entries last week")
+        return None
+
+    lang = summary_language_for_locale(ui_locale)
+    day_system = build_day_system_prompt(lang)
+    day_summaries: list[tuple[date, str]] = []
+    for day in days:
+        if should_abort():
+            log("weekly summary aborted before day map")
+            return None
+        content = build_day_user_content(day, lang)
+        summary = run_with_timeout(
+            lambda c=content: summarize(c, day_system),
+            day_timeout_s,
+            label="weekly day summary",
+        )
+        day_summaries.append((day.day, summary.strip()))
+
+    if should_abort():
+        log("weekly summary aborted before reduce")
+        return None
+
+    reduce_system = build_reduce_system_prompt(lang)
+    reduce_content = build_reduce_user_content(day_summaries, start, end, lang)
+    overview = run_with_timeout(
+        lambda: summarize(reduce_content, reduce_system),
+        reduce_timeout_s,
+        label="weekly reduce",
+    )
+
+    total_entries = sum(len(d.entries) for d in days)
+    markdown = render_summary_markdown(
+        start=start,
+        end=end,
+        overview=overview,
+        day_summaries=day_summaries,
+        total_entries=total_entries,
+        lang=lang,
+        now_text=now_text,
+        model_name=model_name,
+    )
+    _atomic_write(target, markdown)
+    log(f"weekly summary written: {target}")
+    return target

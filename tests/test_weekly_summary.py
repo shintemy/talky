@@ -132,3 +132,87 @@ def test_render_summary_markdown_en() -> None:
     assert "## By Day" in md
     assert "### 05-25 Mon" in md
     assert "1 outputs / 1 days" in md
+
+
+from talky.weekly_summary import run_weekly_summary
+
+
+def _ok_run(**overrides):
+    """Build default args for run_weekly_summary; override as needed."""
+    data = {
+        "2026-05-25": [_entry("09:00:00", "daily", "a")],
+        "2026-05-26": [_entry("09:00:00", "vibecoding", "b")],
+    }
+    args = dict(
+        today=_date(2026, 6, 2),
+        summaries_dir=overrides.pop("summaries_dir"),
+        read_structured=lambda d: list(data.get(d, [])),
+        summarize=lambda content, system_prompt: f"SUM[{content[:6]}]",
+        is_ready=lambda: True,
+        should_abort=lambda: False,
+        ui_locale="mixed",
+        model_name="qwen3.5:9b",
+        now_text="2026-06-01 09:00",
+    )
+    args.update(overrides)
+    return args
+
+
+def test_run_weekly_summary_writes_file(tmp_path) -> None:
+    path = run_weekly_summary(**_ok_run(summaries_dir=tmp_path))
+    assert path is not None
+    assert path == tmp_path / "summary-2026-05-25_2026-05-31.md"
+    content = path.read_text(encoding="utf-8")
+    assert "# 周报 2026-05-25 ~ 2026-05-31" in content
+    assert "共 2 条输出 / 覆盖 2 天" in content
+    # no leftover temp file
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_run_weekly_summary_skips_when_already_done(tmp_path) -> None:
+    (tmp_path / "summary-2026-05-25_2026-05-31.md").write_text("x", encoding="utf-8")
+    called = {"n": 0}
+
+    def counting_summarize(content, system_prompt):
+        called["n"] += 1
+        return "x"
+
+    path = run_weekly_summary(
+        **_ok_run(summaries_dir=tmp_path, summarize=counting_summarize)
+    )
+    assert path is None
+    assert called["n"] == 0
+
+
+def test_run_weekly_summary_skips_when_not_ready(tmp_path) -> None:
+    path = run_weekly_summary(**_ok_run(summaries_dir=tmp_path, is_ready=lambda: False))
+    assert path is None
+    assert list(tmp_path.glob("*.md")) == []
+
+
+def test_run_weekly_summary_skips_empty_week(tmp_path) -> None:
+    path = run_weekly_summary(
+        **_ok_run(summaries_dir=tmp_path, read_structured=lambda d: [])
+    )
+    assert path is None
+    assert list(tmp_path.glob("*.md")) == []
+
+
+def test_run_weekly_summary_aborts_without_writing(tmp_path) -> None:
+    path = run_weekly_summary(
+        **_ok_run(summaries_dir=tmp_path, should_abort=lambda: True)
+    )
+    assert path is None
+    assert list(tmp_path.glob("*.md")) == []
+
+
+def test_run_weekly_summary_does_not_write_on_summarize_error(tmp_path) -> None:
+    def boom(content, system_prompt):
+        raise RuntimeError("llm down")
+
+    try:
+        run_weekly_summary(**_ok_run(summaries_dir=tmp_path, summarize=boom))
+    except RuntimeError:
+        pass
+    assert list(tmp_path.glob("*.md")) == []
+    assert list(tmp_path.glob("*.tmp")) == []
