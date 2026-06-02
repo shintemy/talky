@@ -725,3 +725,54 @@ def test_run_weekly_summary_async_resets_flag_on_error(
 
     controller._run_weekly_summary_async(date(2026, 6, 2))
     assert controller._weekly_summary_in_progress is False
+
+
+def test_auto_adopt_binds_installed_model_when_configured_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller.settings.ollama_model = "qwen3.5:9b"
+    monkeypatch.setattr(
+        "talky.controller.resolve_installed_model",
+        lambda configured, host="": "gemma4:e2b",
+    )
+
+    controller._auto_adopt_installed_model()
+
+    assert controller.settings.ollama_model == "gemma4:e2b"
+    assert controller.config_store.load().ollama_model == "gemma4:e2b"
+    assert controller.llm.model_name == "gemma4:e2b"
+
+
+def test_auto_adopt_noop_when_model_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = _build_controller()
+    controller.settings.ollama_model = "gemma4:e2b"
+    monkeypatch.setattr(
+        "talky.controller.resolve_installed_model",
+        lambda configured, host="": "gemma4:e2b",
+    )
+    saves: list = []
+    monkeypatch.setattr(controller.config_store, "save", lambda s: saves.append(s))
+
+    controller._auto_adopt_installed_model()
+
+    assert controller.settings.ollama_model == "gemma4:e2b"
+    assert saves == []
+
+
+def test_auto_adopt_skips_cloud_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = _build_controller()
+    controller.settings.mode = "cloud"
+    controller.settings.usage_mode = "vibecoding"
+    controller.settings.cloud_api_url = "https://example.com"
+    controller.settings.cloud_api_key = "k"
+    controller.cloud_service = controller._build_cloud_service()
+    calls: list = []
+    monkeypatch.setattr(
+        "talky.controller.resolve_installed_model",
+        lambda *a, **k: calls.append(1) or "x",
+    )
+
+    controller._auto_adopt_installed_model()
+
+    assert calls == []
