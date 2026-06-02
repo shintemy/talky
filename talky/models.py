@@ -24,6 +24,22 @@ def detect_ollama_model(host: str = "") -> str:
     return models[0] if models else ""
 
 
+def resolve_installed_model(configured: str, host: str = "") -> str:
+    """Prefer an installed local model.
+
+    - configured model is installed -> keep it
+    - configured missing but other models exist -> adopt the first installed model
+    - no models installed -> keep configured (recommended) for the download suggestion
+    """
+    models = list_ollama_models(host)
+    if not models:
+        return configured
+    configured = (configured or "").strip()
+    if configured and configured in models:
+        return configured
+    return models[0]
+
+
 def list_ollama_models(host: str = "") -> list[str]:
     """Query Ollama for installed models and return all names."""
     host = (host or os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")).rstrip("/")

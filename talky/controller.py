@@ -28,7 +28,12 @@ from talky.focus import FrontAppInfo, activate_app_by_pid, get_frontmost_app, ha
 from talky.hotkey import HoldToTalkHotkey
 from talky.history_store import HistoryStore
 from talky.llm_service import OllamaTextCleaner
-from talky.models import AppSettings, SESSION_START_USAGE_MODE, list_ollama_models
+from talky.models import (
+    AppSettings,
+    SESSION_START_USAGE_MODE,
+    list_ollama_models,
+    resolve_installed_model,
+)
 from talky.paster import ClipboardPaster
 from talky.permissions import check_ollama_reachable
 from talky.prompting import build_asr_initial_prompt, build_asr_strict_retry_prompt
@@ -1188,6 +1193,26 @@ class AppController(QObject):
             f"Details: {exc}"
         )
 
+    def _auto_adopt_installed_model(self) -> None:
+        """If the configured Ollama model isn't installed but others are, adopt an installed one."""
+        if self.is_cloud_mode:
+            return
+        if self.settings.mode not in {"local", "remote"}:
+            return
+        host = os.environ.get("OLLAMA_HOST", "")
+        resolved = resolve_installed_model(self.settings.ollama_model, host)
+        if not resolved or resolved == self.settings.ollama_model:
+            return
+        append_debug_log(
+            f"auto-adopt installed ollama model: {self.settings.ollama_model!r} -> {resolved!r}"
+        )
+        self.settings.ollama_model = resolved
+        self.config_store.save(self.settings)
+        self.llm = OllamaTextCleaner(
+            model_name=resolved, debug_stream=self.settings.llm_debug_stream
+        )
+        self.settings_updated.emit(self.settings)
+
     def _warm_up_models_async(self) -> None:
         if self.is_cloud_mode:
             return
@@ -1199,6 +1224,10 @@ class AppController(QObject):
         worker.start()
 
     def _warm_up_models(self) -> None:
+        try:
+            self._auto_adopt_installed_model()
+        except Exception as exc:
+            append_debug_log(f"auto-adopt model failed: {exc}")
         try:
             if should_warm_up_asr():
                 try:

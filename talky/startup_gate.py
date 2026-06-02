@@ -142,8 +142,10 @@ def alert_if_local_ollama_unready(
     apply_ollama_host_from_settings(settings)
 
     from talky.onboarding import RemoteOllamaConnectDialog
+    from talky.models import resolve_installed_model
 
-    status = run_preflight_check(required_model=settings.ollama_model)
+    resolved = resolve_installed_model(settings.ollama_model)
+    status = run_preflight_check(required_model=resolved)
     if status == OllamaStatus.READY:
         return False
 

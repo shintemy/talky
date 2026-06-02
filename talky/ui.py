@@ -2267,6 +2267,12 @@ class ConfigsTab(QWidget):
             ollama_model=model,
         )
         if ok:
+            from talky.models import list_ollama_models, resolve_installed_model
+
+            installed = list_ollama_models(host)
+            if installed and model not in installed:
+                bound = resolve_installed_model(model, host)
+                self._populate_ollama_models(host, preferred_model=bound)
             return True
 
         box = QMessageBox(self)
@@ -2373,13 +2379,6 @@ class ConfigsTab(QWidget):
                 "Cannot reach Ollama or no models found on host: "
                 f"{ollama_host}\n\n"
                 "Please verify host/port and ensure at least one model is installed.",
-            )
-        if ollama_model not in models:
-            preview = ", ".join(models[:6])
-            return (
-                False,
-                f"Model '{ollama_model}' is not available on {ollama_host}.\n\n"
-                f"Available models: {preview}",
             )
         return True, ""
 
