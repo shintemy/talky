@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -68,6 +68,33 @@ def test_alert_local_skips_when_ollama_ready(tmp_path):
     store.save(settings)
     with patch("talky.startup_gate.run_preflight_check", return_value=OllamaStatus.READY):
         assert alert_if_local_ollama_unready(store) is False
+
+
+def test_alert_skips_when_installed_model_differs_from_configured(tmp_path, monkeypatch):
+    from talky.startup_gate import alert_if_local_ollama_unready
+
+    store = AppConfigStore(tmp_path / "settings.json")
+    settings = store.load()
+    settings.mode = "local"
+    settings.usage_mode = "vibecoding"
+    settings.ollama_model = "qwen3.5:9b"
+    # store.save() resets usage_mode to "daily"; patch load() to keep vibecoding so
+    # the LLM-required path actually reaches preflight.
+    monkeypatch.setattr(store, "load", lambda: settings)
+
+    # Ollama installed + reachable; only gemma4 is installed (NOT the configured qwen3.5).
+    # resolve_installed_model should adopt gemma4 -> preflight READY -> no warning dialog.
+    with (
+        patch("talky.preflight.is_ollama_installed", return_value=True),
+        patch("talky.preflight.check_ollama_reachable", return_value=(True, "")),
+        patch("talky.preflight.list_ollama_models", return_value=["gemma4:e2b"]),
+        patch("talky.models.list_ollama_models", return_value=["gemma4:e2b"]),
+        patch("talky.startup_gate.QMessageBox") as mock_box,
+    ):
+        result = alert_if_local_ollama_unready(store)
+
+    assert result is False
+    mock_box.assert_not_called()
 
 
 def test_ensure_local_existing_user_missing_bound_model_enters_returning_prompt(tmp_path, monkeypatch):

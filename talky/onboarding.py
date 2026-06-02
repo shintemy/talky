@@ -4,7 +4,6 @@ import os
 import subprocess
 
 from talky.models import AppSettings, list_ollama_models
-from talky.model_name_guard import apple_script_escape, build_pull_command, is_safe_ollama_model_name
 from talky.preflight import OllamaStatus, detect_system_locale, run_preflight_check
 from talky.permissions import check_ollama_reachable
 
@@ -1127,25 +1126,3 @@ def show_returning_user_prompt(
         models = list_ollama_models()
         if models:
             return True
-
-
-def confirm_bind_available_model(*, locale: str, from_model: str, to_model: str, host: str) -> bool:
-    zh = locale == "zh"
-    title = "确认模型切换" if zh else "Confirm model switch"
-    text = (
-        "将把当前绑定模型切换到：{to_model}\n原绑定模型：{from_model}\nHost：{host}"
-        if zh
-        else "This will switch the configured model to: {to_model}\nCurrent configured model: {from_model}\nHost: {host}"
-    ).format(
-        to_model=to_model,
-        from_model=from_model or ("（空）" if zh else "(empty)"),
-        host=host or "http://127.0.0.1:11434",
-    )
-    result = QMessageBox.question(
-        None,
-        title,
-        text,
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.No,
-    )
-    return result == QMessageBox.StandardButton.Yes
