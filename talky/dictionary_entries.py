@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -52,3 +53,39 @@ def _parse_line(line: str) -> DictionaryEntry | None:
         return DictionaryEntry(term=term, kind="person" if label in _PERSON_LABELS else "term")
 
     return DictionaryEntry(term=line, kind="term")
+
+
+_CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿]")
+
+
+def _term_appears(term: str, text: str) -> bool:
+    if _CJK_RE.search(term):
+        return term in text
+    return re.search(rf"\b{re.escape(term)}\b", text, re.IGNORECASE) is not None
+
+
+def match_dictionary_tags(
+    text: str, entries: list[DictionaryEntry]
+) -> tuple[list[str], list[str]]:
+    """Return (matched_persons, matched_terms) that appear in text.
+
+    person = entry.kind == "person"; term = otherwise. CJK terms match by
+    substring; pure-ASCII terms match on word boundaries (case-insensitive).
+    De-duplicated, preserving dictionary order.
+    """
+    persons: list[str] = []
+    terms: list[str] = []
+    seen_persons: set[str] = set()
+    seen_terms: set[str] = set()
+    for entry in entries:
+        term = entry.term
+        if not term or not _term_appears(term, text):
+            continue
+        if entry.kind == "person":
+            if term not in seen_persons:
+                seen_persons.add(term)
+                persons.append(term)
+        elif term not in seen_terms:
+            seen_terms.add(term)
+            terms.append(term)
+    return persons, terms
