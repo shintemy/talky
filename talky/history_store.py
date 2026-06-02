@@ -12,6 +12,8 @@ class HistoryEntryMetadata:
     asr_language: str = ""
     translation_output_language: str = ""
     debug_audio_path: str = ""
+    matched_persons: tuple[str, ...] = ()
+    matched_terms: tuple[str, ...] = ()
 
 
 class HistoryStore:
@@ -51,6 +53,8 @@ class HistoryStore:
         asr_language: str = "",
         translation_output_language: str = "",
         debug_audio_path: str | Path | None = None,
+        matched_persons: list[str] | tuple[str, ...] = (),
+        matched_terms: list[str] | tuple[str, ...] = (),
     ) -> Path:
         timestamp = now or datetime.now()
         self.history_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +64,8 @@ class HistoryStore:
             asr_language=(asr_language or "").strip(),
             translation_output_language=(translation_output_language or "").strip(),
             debug_audio_path=self._normalize_debug_audio_path(debug_audio_path),
+            matched_persons=tuple(matched_persons),
+            matched_terms=tuple(matched_terms),
         )
         entry = self._format_entry(
             text=text,
@@ -124,6 +130,10 @@ class HistoryStore:
             lines.append(f"ASR 语言: {metadata.asr_language}")
         if metadata.usage_mode == "translation" and metadata.translation_output_language:
             lines.append(f"目标语言: {metadata.translation_output_language}")
+        if metadata.matched_persons:
+            lines.append(f"人物: {', '.join(metadata.matched_persons)}")
+        if metadata.matched_terms:
+            lines.append(f"术语: {', '.join(metadata.matched_terms)}")
         if metadata.debug_audio_path:
             lines.append(f"调试音频: {metadata.debug_audio_path}")
         if not lines:

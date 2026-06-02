@@ -102,3 +102,29 @@ def test_history_store_appends_mode_and_language_metadata(tmp_path: Path) -> Non
     entries = store.read_entries("2026-05-24")
     assert entries[0][0] == "16:05:00"
     assert "模式: Translation" in entries[0][1]
+
+
+def test_history_store_renders_dictionary_tags(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    day = datetime(2026, 5, 25, 9, 0, 0)
+
+    store.append(
+        "张三 部署了 Kubernetes",
+        now=day,
+        usage_mode="vibecoding",
+        asr_language="zh",
+        matched_persons=["张三"],
+        matched_terms=["Kubernetes"],
+    )
+
+    content = (tmp_path / "history" / "2026-05-25.md").read_text(encoding="utf-8")
+    assert "人物: 张三" in content
+    assert "术语: Kubernetes" in content
+
+
+def test_history_store_omits_empty_tag_lines(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    store.append("没有标签", now=datetime(2026, 5, 25, 9, 0, 0))
+    content = (tmp_path / "history" / "2026-05-25.md").read_text(encoding="utf-8")
+    assert "人物:" not in content
+    assert "术语:" not in content
