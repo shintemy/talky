@@ -21,6 +21,7 @@ from talky.dictionary_corrector import apply_phonetic_dictionary, normalize_pers
 from talky.dictionary_entries import (
     extract_person_terms,
     extract_terms,
+    match_dictionary_tags,
     parse_dictionary_entries,
 )
 from talky.focus import FrontAppInfo, activate_app_by_pid, get_frontmost_app, has_focus_target
@@ -929,6 +930,10 @@ class AppController(QObject):
         final_text = collapse_duplicate_output(final_text)
         return ProcessingResult(final_text=final_text, raw_text=raw_text)
 
+    def _compute_history_tags(self, final_text: str) -> tuple[list[str], list[str]]:
+        entries = parse_dictionary_entries(self.settings.custom_dictionary)
+        return match_dictionary_tags(final_text, entries)
+
     def _process_pipeline(
         self,
         detached: tuple,
@@ -1021,6 +1026,7 @@ class AppController(QObject):
             self._last_output_ts = now
 
             print(f"[Talky] Final text: {final_text}")
+            matched_persons, matched_terms = self._compute_history_tags(final_text)
             history_path = self.history_store.append(
                 final_text,
                 raw_text=raw_text,
@@ -1028,6 +1034,8 @@ class AppController(QObject):
                 asr_language=self.settings.language,
                 translation_output_language=self.settings.translation_output_language,
                 debug_audio_path=debug_audio_path,
+                matched_persons=matched_persons,
+                matched_terms=matched_terms,
             )
             print(f"[Talky] History appended: {history_path}")
 

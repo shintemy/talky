@@ -610,3 +610,19 @@ def test_periodic_maintenance_skips_while_processing(
 
     assert controller._asr is not None
     assert started == []
+
+
+def test_compute_history_tags_matches_dictionary(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = _build_controller()
+    controller.settings.custom_dictionary = ["[person]张三", "Kubernetes"]
+
+    persons, terms = controller._compute_history_tags("张三 部署 Kubernetes")
+
+    assert persons == ["张三"]
+    assert terms == ["Kubernetes"]
+
+
+def test_compute_history_tags_empty_dictionary() -> None:
+    controller = _build_controller()
+    controller.settings.custom_dictionary = []
+    assert controller._compute_history_tags("anything") == ([], [])
