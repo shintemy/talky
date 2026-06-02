@@ -173,6 +173,25 @@ class OllamaTextCleaner:
             return final
         return selected_text.strip()
 
+    def summarize(
+        self, content: str, *, system_prompt: str, num_predict: int = 600
+    ) -> str:
+        stream = self._chat_with_fallback(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": content},
+            ],
+            think=False,
+            stream=True,
+            options={"temperature": 0.3, "num_predict": num_predict, "top_p": 0.9},
+        )
+        parts: list[str] = []
+        for chunk in stream:
+            piece = chunk.get("message", {}).get("content", "") or ""
+            if piece:
+                parts.append(piece)
+        return _sanitize_llm_surface_text("".join(parts).strip())
+
     def _chat_with_fallback(self, messages, think: bool, stream: bool, options: dict):
         try:
             return self._ollama_client.chat(

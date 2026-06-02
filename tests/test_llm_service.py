@@ -284,3 +284,28 @@ def test_rewrite_selected_text_falls_back_to_selected_text_when_empty_output() -
     )
 
     assert result == "我周四去找你"
+
+
+from talky.llm_service import OllamaTextCleaner
+
+
+def test_summarize_accumulates_and_sanitizes(monkeypatch) -> None:
+    cleaner = OllamaTextCleaner(model_name="test-model")
+
+    captured: dict = {}
+
+    def fake_chat(*, messages, think, stream, options):
+        captured["messages"] = messages
+        captured["options"] = options
+        return [
+            {"message": {"content": "本周"}},
+            {"message": {"content": "概览<channel|>真正概览"}},
+        ]
+
+    monkeypatch.setattr(cleaner, "_chat_with_fallback", fake_chat)
+
+    out = cleaner.summarize("一些内容", system_prompt="你是助理")
+
+    assert out == "真正概览"  # text after <channel|> only
+    assert captured["messages"][0] == {"role": "system", "content": "你是助理"}
+    assert captured["messages"][1] == {"role": "user", "content": "一些内容"}
