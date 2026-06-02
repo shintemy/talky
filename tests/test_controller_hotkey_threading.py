@@ -626,3 +626,102 @@ def test_compute_history_tags_empty_dictionary() -> None:
     controller = _build_controller()
     controller.settings.custom_dictionary = []
     assert controller._compute_history_tags("anything") == ([], [])
+
+
+from datetime import date
+
+
+def test_maybe_run_weekly_summary_spawns_worker_when_due(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = _build_controller()
+    controller._summaries_dir = tmp_path
+    controller._last_weekly_summary_check_ts = 0.0
+
+    called: list = []
+    monkeypatch.setattr(
+        controller, "_run_weekly_summary_async", lambda today: called.append(today)
+    )
+
+    controller._maybe_run_weekly_summary(time.monotonic())
+    _wait_until(lambda: len(called) == 1)
+
+    assert controller._weekly_summary_in_progress is True
+
+
+def test_maybe_run_weekly_summary_skips_when_already_summarized(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from talky.weekly_summary import previous_iso_week_range, summary_path
+
+    controller = _build_controller()
+    controller._summaries_dir = tmp_path
+    controller._last_weekly_summary_check_ts = 0.0
+    start, end = previous_iso_week_range(date.today())
+    summary_path(tmp_path, start, end).write_text("done", encoding="utf-8")
+
+    called: list = []
+    monkeypatch.setattr(
+        controller, "_run_weekly_summary_async", lambda today: called.append(today)
+    )
+
+    controller._maybe_run_weekly_summary(time.monotonic())
+    time.sleep(0.05)
+    _app.processEvents()
+
+    assert called == []
+    assert controller._weekly_summary_in_progress is False
+
+
+def test_maybe_run_weekly_summary_skips_when_in_progress(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = _build_controller()
+    controller._summaries_dir = tmp_path
+    controller._last_weekly_summary_check_ts = 0.0
+    controller._weekly_summary_in_progress = True
+
+    called: list = []
+    monkeypatch.setattr(
+        controller, "_run_weekly_summary_async", lambda today: called.append(today)
+    )
+
+    controller._maybe_run_weekly_summary(time.monotonic())
+    assert called == []
+
+
+def test_run_weekly_summary_async_resets_flag_and_notifies(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = _build_controller()
+    controller._summaries_dir = tmp_path
+    controller._weekly_summary_in_progress = True
+
+    monkeypatch.setattr(
+        "talky.controller.run_weekly_summary",
+        lambda **kwargs: tmp_path / "summary-x.md",
+    )
+    statuses: list[str] = []
+    controller.status_signal.connect(statuses.append)
+
+    controller._run_weekly_summary_async(date(2026, 6, 2))
+    _app.processEvents()
+
+    assert controller._weekly_summary_in_progress is False
+    assert any("summary-x.md" in s for s in statuses)
+
+
+def test_run_weekly_summary_async_resets_flag_on_error(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = _build_controller()
+    controller._summaries_dir = tmp_path
+    controller._weekly_summary_in_progress = True
+
+    def boom(**kwargs):
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr("talky.controller.run_weekly_summary", boom)
+
+    controller._run_weekly_summary_async(date(2026, 6, 2))
+    assert controller._weekly_summary_in_progress is False
