@@ -402,8 +402,10 @@ class AppController(QObject):
             return
         if self._is_talky_front_app(front_app):
             return
-        name = front_app.name.strip().lower()
-        if name in {"finder", "dock", "loginwindow"}:
+        if self._is_transient_front_app(front_app):
+            # Transient system UI (TextInputMenuAgent, SystemUIServer, etc.) must not
+            # become the paste target; keep the previously-remembered real front app so
+            # _should_paste_to_focus_target can restore focus to it.
             return
         self._last_target_front_app = front_app
 

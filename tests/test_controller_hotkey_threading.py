@@ -135,6 +135,9 @@ def test_wake_guard_rebuilds_when_hotkey_health_check_fails(
     controller._is_recording = False
     controller._is_processing = False
     controller._last_wake_guard_tick_ts = time.monotonic() - 1.0
+    # Keep the idle-tick weekly-summary check from firing real background work;
+    # this test only exercises hotkey health-check recovery.
+    controller._last_weekly_summary_check_ts = time.monotonic()
     controller.settings.wake_guard_gap_threshold_s = 20.0
 
     events: list[str] = []
@@ -146,7 +149,8 @@ def test_wake_guard_rebuilds_when_hotkey_health_check_fails(
             return False
 
     controller.hotkey = _DeadHotkey()  # type: ignore[assignment]
-    monkeypatch.setattr(controller.status_signal, "emit", lambda msg: events.append(msg))
+    # PyQt6 signals are read-only on .emit; connect a slot instead of patching emit.
+    controller.status_signal.connect(events.append)
     monkeypatch.setattr(controller, "_start_hotkey", lambda: rebuilds.append("rebuilt"))
     monkeypatch.setattr(controller, "_record_wake_guard_rebuild", lambda now: telemetry.append(now))
 
@@ -181,7 +185,8 @@ def test_wake_guard_recovers_stale_recording_after_sleep_gap(
         "_safe_close_stream",
         lambda stream: closed_streams.append(stream),
     )
-    monkeypatch.setattr(controller.status_signal, "emit", lambda msg: events.append(msg))
+    # PyQt6 signals are read-only on .emit; connect a slot instead of patching emit.
+    controller.status_signal.connect(events.append)
     monkeypatch.setattr(controller, "_start_hotkey", lambda: rebuilds.append("rebuilt"))
     monkeypatch.setattr(controller, "_record_wake_guard_rebuild", lambda now: telemetry.append(now))
 
@@ -377,7 +382,11 @@ def test_process_pipeline_stores_raw_text_but_pastes_final_text(
         lambda text, raw_text="", **_kwargs: history_entries.append((text, raw_text))
         or Path("/tmp/history.md"),
     )
-    monkeypatch.setattr(controller.paste_to_front_signal, "emit", lambda text: pasted.append(text))
+    # PyQt6 signals are read-only on .emit. Replace the real (queued) _do_paste_to_front
+    # slot with a synchronous test slot so the emitted text is captured immediately and
+    # no real paste is queued onto the shared QApplication event loop.
+    controller.paste_to_front_signal.disconnect()
+    controller.paste_to_front_signal.connect(pasted.append)
 
     controller._process_pipeline((object(), [], 16000.0), generation=9, has_focus=False)
 

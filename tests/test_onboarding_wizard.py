@@ -59,7 +59,10 @@ def test_wizard_complete_saves_settings():
     )
     wizard._selected_model = "qwen3.5:9b"
     wizard._selected_host = "http://127.0.0.1:11434"
-    wizard._finish()
+    # Persisting the chosen Ollama settings now happens in _goto_all_set (the
+    # Whisper gate before the "All set!" page); _finish only calls accept().
+    with patch("talky.asr_service.is_whisper_model_cached", return_value=True):
+        wizard._goto_all_set()
     store.save.assert_called_once()
     saved = store.save.call_args[0][0]
     assert saved.ollama_model == "qwen3.5:9b"
@@ -152,8 +155,8 @@ def test_show_returning_user_prompt_blocks_unsafe_model_pull():
     with (
         patch("talky.onboarding.QMessageBox") as mock_box,
         patch("talky.onboarding.check_ollama_reachable", return_value=(True, "")),
-        patch("talky.onboarding.list_ollama_models", return_value=["qwen3.5:9b"]),
-        patch("talky.onboarding.subprocess.Popen") as popen,
+        patch("talky.models.list_ollama_models", return_value=["qwen3.5:9b"]),
+        patch("subprocess.Popen") as popen,
     ):
         mock_box.Icon = MagicMock()
         mock_box.ButtonRole = MagicMock()
@@ -196,7 +199,7 @@ def test_show_returning_user_prompt_bind_requires_explicit_confirmation():
     with (
         patch("talky.onboarding.QMessageBox") as mock_box,
         patch("talky.onboarding.check_ollama_reachable", return_value=(True, "")),
-        patch("talky.onboarding.list_ollama_models", return_value=["qwen3.5:14b"]),
+        patch("talky.models.list_ollama_models", return_value=["qwen3.5:14b"]),
         patch("talky.onboarding.confirm_bind_available_model", side_effect=[False, True]) as mock_confirm,
     ):
         mock_box.Icon = MagicMock()

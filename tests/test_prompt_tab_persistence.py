@@ -29,14 +29,24 @@ def _build_window() -> tuple[AppController, SettingsWindow]:
     return controller, SettingsWindow(controller)
 
 
-def test_prompt_is_persisted_when_switching_away_from_prompt_tab() -> None:
+def test_daily_prompt_saved_via_save_button_persists_and_survives_tab_switch() -> None:
     controller, window = _build_window()
     edited_prompt = "Custom prompt from tab switch"
 
+    # Enter the Prompt tab and edit + save the Daily prompt module.
     window._on_tab_changed(3)
-    window._prompt_tab._editor.setPlainText(edited_prompt)  # noqa: SLF001
-    window._on_tab_changed(0)
+    prompt_tab = window._prompt_tab
+    prompt_tab._daily_enter_edit()  # noqa: SLF001
+    prompt_tab._daily_widgets["editor"].setPlainText(edited_prompt)  # noqa: SLF001
+    prompt_tab._daily_save()  # noqa: SLF001
 
+    # Saving the Daily prompt persists it to settings.
     assert controller.settings.custom_llm_prompt == edited_prompt
+
+    # Switching away (which cancels any in-progress edit) and back re-loads the
+    # saved value into the editor.
+    window._on_tab_changed(0)
     window._on_tab_changed(3)
-    assert window._prompt_tab._editor.toPlainText() == edited_prompt  # noqa: SLF001
+    assert (
+        window._prompt_tab._daily_widgets["editor"].toPlainText() == edited_prompt  # noqa: SLF001
+    )
