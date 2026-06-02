@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import gc
 import os
 import re
 import shutil
@@ -47,6 +48,7 @@ from talky.text_guard import (
     looks_like_unexpected_english_asr_output,
     looks_like_wrong_translation_output,
 )
+from talky.periodic_maintenance import should_run_periodic_maintenance
 from talky.wake_guard import (
     normalize_wake_guard_threshold,
     should_recover_stale_recording_after_wake,
@@ -63,6 +65,7 @@ _MIN_RECORD_DURATION_S = 0.30
 _MIN_RECORD_RMS = 0.003
 _HOTKEY_COOLDOWN_S = 0.45
 _WAKE_GUARD_INTERVAL_MS = 5000
+_PERIODIC_MAINTENANCE_INTERVAL_S = 6 * 3600
 _PROCESSING_WATCHDOG_INTERVAL_MS = 1000
 _RECORD_RELEASE_GUARD_INTERVAL_MS = 250
 _PROCESSING_TIMEOUT_S = 45.0
@@ -183,6 +186,7 @@ class AppController(QObject):
         self._wake_guard_timer: QTimer | None = None
         self._last_wake_guard_tick_ts = time.monotonic()
         self._last_wake_guard_rebuild_ts = 0.0
+        self._last_periodic_maintenance_ts = time.monotonic()
         self._last_pipeline_state = "idle"
         self._processing_watchdog_timer: QTimer | None = None
         self._record_release_guard_timer: QTimer | None = None
@@ -227,6 +231,7 @@ class AppController(QObject):
         self._start_wake_guard()
         self._start_processing_watchdog()
         self._start_record_release_guard()
+        self._last_periodic_maintenance_ts = time.monotonic()
         self._emit_pipeline_state("idle", source="start")
         self._warm_up_models_async()
 
@@ -491,6 +496,8 @@ class AppController(QObject):
         now = time.monotonic()
         elapsed = now - self._last_wake_guard_tick_ts
         self._last_wake_guard_tick_ts = now
+        if not self._is_recording and not self._is_processing:
+            self._maybe_run_periodic_maintenance(now)
         threshold = self._wake_guard_threshold()
         rebuild_due_to_gap = should_rebuild_hotkey(elapsed, threshold)
         hotkey_healthy = bool(self.hotkey and self.hotkey.ensure_active())
@@ -518,6 +525,32 @@ class AppController(QObject):
             f"{reason} Hotkey listener refreshed. "
             f"Wake-guard telemetry: {self.settings.wake_guard_suspected_false_positive_count}/"
             f"{self.settings.wake_guard_rebuild_count} suspected false-positive."
+        )
+
+    def _maybe_run_periodic_maintenance(self, now_ts: float) -> None:
+        elapsed = now_ts - self._last_periodic_maintenance_ts
+        if not should_run_periodic_maintenance(
+            elapsed_since_last_s=elapsed,
+            interval_s=_PERIODIC_MAINTENANCE_INTERVAL_S,
+            is_recording=self._is_recording,
+            is_processing=self._is_processing,
+        ):
+            return
+        self._run_periodic_maintenance(now_ts)
+
+    def _run_periodic_maintenance(self, now_ts: float) -> None:
+        append_debug_log("periodic maintenance: clearing runtime cache and refreshing hotkey")
+        had_asr = self._asr is not None
+        self._asr = None
+        collected = gc.collect()
+        self._start_hotkey()
+        self._last_periodic_maintenance_ts = now_ts
+        append_debug_log(
+            "periodic maintenance done: "
+            f"asr_reset={had_asr}; gc_collected={collected}"
+        )
+        self.status_signal.emit(
+            "Routine maintenance completed. Hotkey listener refreshed and runtime cache cleared."
         )
 
     def _recover_stale_recording_after_wake(self) -> bool:

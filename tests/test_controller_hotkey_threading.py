@@ -573,3 +573,40 @@ def test_get_asr_rebuilds_when_language_drift_detected() -> None:
     second = controller._get_asr()
     assert second.language == "en"
     assert second is not first
+
+
+def test_periodic_maintenance_clears_asr_and_rebuilds_hotkey(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller._asr = object()
+    started: list[int] = []
+
+    def fake_start_hotkey() -> None:
+        started.append(1)
+
+    monkeypatch.setattr(controller, "_start_hotkey", fake_start_hotkey)
+    controller._last_periodic_maintenance_ts = time.monotonic() - (7 * 3600)
+
+    controller._maybe_run_periodic_maintenance(time.monotonic())
+
+    assert controller._asr is None
+    assert started == [1]
+    assert controller._last_periodic_maintenance_ts > 0
+
+
+def test_periodic_maintenance_skips_while_processing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    controller = _build_controller()
+    controller._asr = object()
+    controller._is_processing = True
+    started: list[int] = []
+
+    monkeypatch.setattr(controller, "_start_hotkey", lambda: started.append(1))
+    controller._last_periodic_maintenance_ts = time.monotonic() - (7 * 3600)
+
+    controller._maybe_run_periodic_maintenance(time.monotonic())
+
+    assert controller._asr is not None
+    assert started == []
