@@ -102,6 +102,8 @@ class HoldToTalkHotkey:
     def start(self) -> None:
         self._using_fallback = False
         primary = self._primary_condition()
+        # Always append the inert Ctrl+Shift+Option chord as a second trigger
+        # (matched with OR semantics), regardless of the configured primary hotkey.
         self._conditions = [primary, set(SECONDARY_CHORD)]
         self._start_quartz_listener(self._conditions)
 
@@ -272,6 +274,11 @@ class HoldToTalkHotkey:
             )
             tap_ref["tap"] = tap
             if tap is None:
+                # Tap creation denied (e.g. Input Monitoring permission). Give up
+                # cleanly — is_healthy() will return False and the controller's
+                # wake-guard health-check rebuilds the listener. (Unlike the old
+                # Fn path, we do not retry as an alt listener: the same denied
+                # CGEventTapCreate call cannot succeed on retry.)
                 return
             self._tap = tap
 

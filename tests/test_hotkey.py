@@ -168,6 +168,39 @@ def test_hold_to_talk_fn_does_not_fire_when_initially_pressed(monkeypatch: pytes
     assert releases == ["r"]
 
 
+def test_dual_trigger_does_not_fire_when_chord_initially_pressed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hotkey_mod, quartz_state = _reload_hotkey(monkeypatch)
+    q = sys.modules["Quartz"]
+    chord_flags = (
+        q.kCGEventFlagMaskControl
+        | q.kCGEventFlagMaskShift
+        | q.kCGEventFlagMaskAlternate
+    )
+    # Simulate the Ctrl+Shift+Option chord already held at listener startup.
+    q.CGEventSourceFlagsState = lambda _state: chord_flags
+
+    presses: list[str] = []
+    releases: list[str] = []
+    listener = hotkey_mod.HoldToTalkHotkey(
+        key_mode="fn",
+        custom_keys=[],
+        on_press=lambda: presses.append("p"),
+        on_release=lambda: releases.append("r"),
+    )
+    listener.start()
+
+    callback = quartz_state["callback"]
+    assert callback is not None
+    # Same chord state right after startup must not fire a phantom press.
+    callback(None, q.kCGEventFlagsChanged, chord_flags, None)
+    assert presses == []
+    # Releasing the chord clears state and fires exactly one release.
+    callback(None, q.kCGEventFlagsChanged, 0, None)
+    assert releases == ["r"]
+
+
 def test_hold_to_talk_ensure_active_reenables_tap_when_healthy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
