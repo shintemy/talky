@@ -16,6 +16,30 @@ class HistoryEntryMetadata:
     matched_terms: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class StructuredHistoryEntry:
+    time_str: str
+    usage_mode: str
+    final_text: str
+    matched_persons: tuple[str, ...]
+    matched_terms: tuple[str, ...]
+
+
+_USAGE_MODE_REVERSE = {
+    "Daily": "daily",
+    "Vibecoding": "vibecoding",
+    "Translation": "translation",
+}
+_KNOWN_META_PREFIXES = (
+    "模式: ",
+    "ASR 语言: ",
+    "目标语言: ",
+    "人物: ",
+    "术语: ",
+    "调试音频: ",
+)
+
+
 class HistoryStore:
     def __init__(self, history_dir: Path) -> None:
         self.history_dir = history_dir
@@ -103,6 +127,65 @@ class HistoryStore:
             i += 2
         entries.reverse()
         return entries
+
+    def read_structured_entries(self, date_str: str) -> list[StructuredHistoryEntry]:
+        """Parse a date's entries into structured records (final text + tags)."""
+        result: list[StructuredHistoryEntry] = []
+        for time_str, segment in self.read_entries(date_str):
+            usage_mode, persons, terms, body = self._parse_segment(segment)
+            result.append(
+                StructuredHistoryEntry(
+                    time_str=time_str,
+                    usage_mode=usage_mode,
+                    final_text=self._extract_final_output(body),
+                    matched_persons=persons,
+                    matched_terms=terms,
+                )
+            )
+        return result
+
+    @staticmethod
+    def _parse_segment(
+        segment: str,
+    ) -> tuple[str, tuple[str, ...], tuple[str, ...], str]:
+        lines = segment.split("\n")
+        usage_mode = ""
+        persons: tuple[str, ...] = ()
+        terms: tuple[str, ...] = ()
+        i = 0
+        consumed = False
+        while i < len(lines):
+            line = lines[i]
+            matched_prefix = next(
+                (p for p in _KNOWN_META_PREFIXES if line.startswith(p)), None
+            )
+            if matched_prefix is None:
+                break
+            value = line[len(matched_prefix):].strip()
+            if matched_prefix == "模式: ":
+                usage_mode = _USAGE_MODE_REVERSE.get(value, value.lower())
+            elif matched_prefix == "人物: ":
+                persons = tuple(x.strip() for x in value.split(",") if x.strip())
+            elif matched_prefix == "术语: ":
+                terms = tuple(x.strip() for x in value.split(",") if x.strip())
+            consumed = True
+            i += 1
+        if consumed:
+            while i < len(lines) and lines[i].strip() == "":
+                i += 1
+        body = "\n".join(lines[i:]).strip()
+        return usage_mode, persons, terms, body
+
+    @staticmethod
+    def _extract_final_output(body: str) -> str:
+        marker = "最终输出"
+        if body.startswith(marker):
+            inner = body[len(marker):].lstrip("\n")
+            idx = inner.find("\n\n原文")
+            if idx >= 0:
+                inner = inner[:idx]
+            return inner.strip()
+        return body.strip()
 
     @staticmethod
     def _normalize_debug_audio_path(debug_audio_path: str | Path | None) -> str:

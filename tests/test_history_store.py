@@ -128,3 +128,47 @@ def test_history_store_omits_empty_tag_lines(tmp_path: Path) -> None:
     content = (tmp_path / "history" / "2026-05-25.md").read_text(encoding="utf-8")
     assert "人物:" not in content
     assert "术语:" not in content
+
+
+from talky.history_store import StructuredHistoryEntry
+
+
+def test_read_structured_entries_extracts_final_text_and_tags(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    day = datetime(2026, 5, 25, 9, 0, 0)
+    store.append(
+        "整理后的最终文本",
+        raw_text="原始识别文本",
+        now=day,
+        usage_mode="vibecoding",
+        asr_language="zh",
+        matched_persons=["张三"],
+        matched_terms=["Kubernetes"],
+    )
+
+    entries = store.read_structured_entries("2026-05-25")
+    assert entries == [
+        StructuredHistoryEntry(
+            time_str="09:00:00",
+            usage_mode="vibecoding",
+            final_text="整理后的最终文本",
+            matched_persons=("张三",),
+            matched_terms=("Kubernetes",),
+        )
+    ]
+
+
+def test_read_structured_entries_handles_plain_daily_entry(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    store.append("纯文本无元数据", now=datetime(2026, 5, 25, 8, 0, 0))
+
+    entries = store.read_structured_entries("2026-05-25")
+    assert len(entries) == 1
+    assert entries[0].final_text == "纯文本无元数据"
+    assert entries[0].usage_mode == ""
+    assert entries[0].matched_persons == ()
+
+
+def test_read_structured_entries_empty_for_missing_date(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    assert store.read_structured_entries("2026-01-01") == []
