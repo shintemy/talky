@@ -21,13 +21,14 @@ from talky.dictionary_corrector import apply_phonetic_dictionary, normalize_pers
 from talky.dictionary_entries import (
     extract_person_terms,
     extract_terms,
+    match_dictionary_tags,
     parse_dictionary_entries,
 )
 from talky.focus import FrontAppInfo, activate_app_by_pid, get_frontmost_app, has_focus_target
 from talky.hotkey import HoldToTalkHotkey
 from talky.history_store import HistoryStore
 from talky.llm_service import OllamaTextCleaner
-from talky.models import AppSettings, SESSION_START_USAGE_MODE
+from talky.models import AppSettings, SESSION_START_USAGE_MODE, list_ollama_models
 from talky.paster import ClipboardPaster
 from talky.permissions import check_ollama_reachable
 from talky.prompting import build_asr_initial_prompt, build_asr_strict_retry_prompt
@@ -56,6 +57,11 @@ from talky.wake_guard import (
     should_rebuild_hotkey,
 )
 from talky.warmup_policy import should_warm_up_asr
+from talky.weekly_summary import (
+    is_week_summarized,
+    previous_iso_week_range,
+    run_weekly_summary,
+)
 
 if TYPE_CHECKING:
     from talky.asr_service import MlxWhisperASR
@@ -66,6 +72,7 @@ _MIN_RECORD_RMS = 0.003
 _HOTKEY_COOLDOWN_S = 0.45
 _WAKE_GUARD_INTERVAL_MS = 5000
 _PERIODIC_MAINTENANCE_INTERVAL_S = 6 * 3600
+_WEEKLY_SUMMARY_CHECK_INTERVAL_S = 30 * 60
 _PROCESSING_WATCHDOG_INTERVAL_MS = 1000
 _RECORD_RELEASE_GUARD_INTERVAL_MS = 250
 _PROCESSING_TIMEOUT_S = 45.0
@@ -187,6 +194,9 @@ class AppController(QObject):
         self._last_wake_guard_tick_ts = time.monotonic()
         self._last_wake_guard_rebuild_ts = 0.0
         self._last_periodic_maintenance_ts = time.monotonic()
+        self._summaries_dir = Path.home() / ".talky" / "summaries"
+        self._last_weekly_summary_check_ts = 0.0
+        self._weekly_summary_in_progress = False
         self._last_pipeline_state = "idle"
         self._processing_watchdog_timer: QTimer | None = None
         self._record_release_guard_timer: QTimer | None = None
@@ -498,6 +508,7 @@ class AppController(QObject):
         self._last_wake_guard_tick_ts = now
         if not self._is_recording and not self._is_processing:
             self._maybe_run_periodic_maintenance(now)
+            self._maybe_run_weekly_summary(now)
         threshold = self._wake_guard_threshold()
         rebuild_due_to_gap = should_rebuild_hotkey(elapsed, threshold)
         hotkey_healthy = bool(self.hotkey and self.hotkey.ensure_active())
@@ -552,6 +563,57 @@ class AppController(QObject):
         self.status_signal.emit(
             "Routine maintenance completed. Hotkey listener refreshed and runtime cache cleared."
         )
+
+    def _maybe_run_weekly_summary(self, now_ts: float) -> None:
+        if self._weekly_summary_in_progress:
+            return
+        if (now_ts - self._last_weekly_summary_check_ts) < _WEEKLY_SUMMARY_CHECK_INTERVAL_S:
+            return
+        self._last_weekly_summary_check_ts = now_ts
+        from datetime import date
+
+        today = date.today()
+        start, end = previous_iso_week_range(today)
+        if is_week_summarized(self._summaries_dir, start, end):
+            return
+        self._weekly_summary_in_progress = True
+        worker = threading.Thread(
+            target=self._run_weekly_summary_async,
+            args=(today,),
+            daemon=True,
+        )
+        worker.start()
+
+    def _weekly_summary_is_ready(self) -> bool:
+        if self.is_cloud_mode:
+            return False
+        if self.settings.mode not in {"local", "remote"}:
+            return False
+        models = list_ollama_models(os.environ.get("OLLAMA_HOST", ""))
+        return bool(models) and self.settings.ollama_model in models
+
+    def _run_weekly_summary_async(self, today) -> None:
+        try:
+            path = run_weekly_summary(
+                today=today,
+                summaries_dir=self._summaries_dir,
+                read_structured=self.history_store.read_structured_entries,
+                summarize=lambda content, system_prompt: self.llm.summarize(
+                    content, system_prompt=system_prompt
+                ),
+                is_ready=self._weekly_summary_is_ready,
+                should_abort=lambda: self._is_recording or self._is_processing,
+                ui_locale=self.settings.ui_locale,
+                model_name=self.settings.ollama_model,
+                now_text=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                log=append_debug_log,
+            )
+            if path is not None:
+                self.status_signal.emit(f"Weekly summary generated: {path}")
+        except Exception as exc:
+            append_debug_log("weekly summary worker failed", exc=exc)
+        finally:
+            self._weekly_summary_in_progress = False
 
     def _recover_stale_recording_after_wake(self) -> bool:
         append_debug_log("wake guard recovering stale recording after sleep/wake gap")
@@ -929,6 +991,10 @@ class AppController(QObject):
         final_text = collapse_duplicate_output(final_text)
         return ProcessingResult(final_text=final_text, raw_text=raw_text)
 
+    def _compute_history_tags(self, final_text: str) -> tuple[list[str], list[str]]:
+        entries = parse_dictionary_entries(self.settings.custom_dictionary)
+        return match_dictionary_tags(final_text, entries)
+
     def _process_pipeline(
         self,
         detached: tuple,
@@ -1021,6 +1087,7 @@ class AppController(QObject):
             self._last_output_ts = now
 
             print(f"[Talky] Final text: {final_text}")
+            matched_persons, matched_terms = self._compute_history_tags(final_text)
             history_path = self.history_store.append(
                 final_text,
                 raw_text=raw_text,
@@ -1028,6 +1095,8 @@ class AppController(QObject):
                 asr_language=self.settings.language,
                 translation_output_language=self.settings.translation_output_language,
                 debug_audio_path=debug_audio_path,
+                matched_persons=matched_persons,
+                matched_terms=matched_terms,
             )
             print(f"[Talky] History appended: {history_path}")
 

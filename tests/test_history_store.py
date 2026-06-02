@@ -102,3 +102,81 @@ def test_history_store_appends_mode_and_language_metadata(tmp_path: Path) -> Non
     entries = store.read_entries("2026-05-24")
     assert entries[0][0] == "16:05:00"
     assert "模式: Translation" in entries[0][1]
+
+
+def test_history_store_renders_dictionary_tags(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    day = datetime(2026, 5, 25, 9, 0, 0)
+
+    store.append(
+        "张三 部署了 Kubernetes",
+        now=day,
+        usage_mode="vibecoding",
+        asr_language="zh",
+        matched_persons=["张三"],
+        matched_terms=["Kubernetes"],
+    )
+
+    content = (tmp_path / "history" / "2026-05-25.md").read_text(encoding="utf-8")
+    assert "人物: 张三" in content
+    assert "术语: Kubernetes" in content
+
+
+def test_history_store_omits_empty_tag_lines(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    store.append("没有标签", now=datetime(2026, 5, 25, 9, 0, 0))
+    content = (tmp_path / "history" / "2026-05-25.md").read_text(encoding="utf-8")
+    assert "人物:" not in content
+    assert "术语:" not in content
+
+
+from talky.history_store import StructuredHistoryEntry
+
+
+def test_read_structured_entries_extracts_final_text_and_tags(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    day = datetime(2026, 5, 25, 9, 0, 0)
+    store.append(
+        "整理后的最终文本",
+        raw_text="原始识别文本",
+        now=day,
+        usage_mode="vibecoding",
+        asr_language="zh",
+        matched_persons=["张三"],
+        matched_terms=["Kubernetes"],
+    )
+
+    entries = store.read_structured_entries("2026-05-25")
+    assert entries == [
+        StructuredHistoryEntry(
+            time_str="09:00:00",
+            usage_mode="vibecoding",
+            final_text="整理后的最终文本",
+            matched_persons=("张三",),
+            matched_terms=("Kubernetes",),
+        )
+    ]
+
+
+def test_read_structured_entries_keeps_final_text_starting_with_marker(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    # Final-only entry (no raw_text, e.g. cloud/edit path) whose text starts with 最终输出.
+    store.append("最终输出就是这句话", now=datetime(2026, 5, 25, 7, 0, 0))
+    entries = store.read_structured_entries("2026-05-25")
+    assert entries[0].final_text == "最终输出就是这句话"
+
+
+def test_read_structured_entries_handles_plain_daily_entry(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    store.append("纯文本无元数据", now=datetime(2026, 5, 25, 8, 0, 0))
+
+    entries = store.read_structured_entries("2026-05-25")
+    assert len(entries) == 1
+    assert entries[0].final_text == "纯文本无元数据"
+    assert entries[0].usage_mode == ""
+    assert entries[0].matched_persons == ()
+
+
+def test_read_structured_entries_empty_for_missing_date(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    assert store.read_structured_entries("2026-01-01") == []

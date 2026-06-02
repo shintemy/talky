@@ -12,6 +12,32 @@ class HistoryEntryMetadata:
     asr_language: str = ""
     translation_output_language: str = ""
     debug_audio_path: str = ""
+    matched_persons: tuple[str, ...] = ()
+    matched_terms: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class StructuredHistoryEntry:
+    time_str: str
+    usage_mode: str
+    final_text: str
+    matched_persons: tuple[str, ...]
+    matched_terms: tuple[str, ...]
+
+
+_USAGE_MODE_REVERSE = {
+    "Daily": "daily",
+    "Vibecoding": "vibecoding",
+    "Translation": "translation",
+}
+_KNOWN_META_PREFIXES = (
+    "模式: ",
+    "ASR 语言: ",
+    "目标语言: ",
+    "人物: ",
+    "术语: ",
+    "调试音频: ",
+)
 
 
 class HistoryStore:
@@ -51,6 +77,8 @@ class HistoryStore:
         asr_language: str = "",
         translation_output_language: str = "",
         debug_audio_path: str | Path | None = None,
+        matched_persons: list[str] | tuple[str, ...] = (),
+        matched_terms: list[str] | tuple[str, ...] = (),
     ) -> Path:
         timestamp = now or datetime.now()
         self.history_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +88,8 @@ class HistoryStore:
             asr_language=(asr_language or "").strip(),
             translation_output_language=(translation_output_language or "").strip(),
             debug_audio_path=self._normalize_debug_audio_path(debug_audio_path),
+            matched_persons=tuple(matched_persons),
+            matched_terms=tuple(matched_terms),
         )
         entry = self._format_entry(
             text=text,
@@ -98,6 +128,63 @@ class HistoryStore:
         entries.reverse()
         return entries
 
+    def read_structured_entries(self, date_str: str) -> list[StructuredHistoryEntry]:
+        """Parse a date's entries into structured records (final text + tags)."""
+        result: list[StructuredHistoryEntry] = []
+        for time_str, segment in self.read_entries(date_str):
+            usage_mode, persons, terms, body = self._parse_segment(segment)
+            result.append(
+                StructuredHistoryEntry(
+                    time_str=time_str,
+                    usage_mode=usage_mode,
+                    final_text=self._extract_final_output(body),
+                    matched_persons=persons,
+                    matched_terms=terms,
+                )
+            )
+        return result
+
+    @staticmethod
+    def _parse_segment(
+        segment: str,
+    ) -> tuple[str, tuple[str, ...], tuple[str, ...], str]:
+        lines = segment.split("\n")
+        usage_mode = ""
+        persons: tuple[str, ...] = ()
+        terms: tuple[str, ...] = ()
+        i = 0
+        consumed = False
+        while i < len(lines):
+            line = lines[i]
+            matched_prefix = next(
+                (p for p in _KNOWN_META_PREFIXES if line.startswith(p)), None
+            )
+            if matched_prefix is None:
+                break
+            value = line[len(matched_prefix):].strip()
+            if matched_prefix == "模式: ":
+                usage_mode = _USAGE_MODE_REVERSE.get(value, value.lower())
+            elif matched_prefix == "人物: ":
+                persons = tuple(x.strip() for x in value.split(",") if x.strip())
+            elif matched_prefix == "术语: ":
+                terms = tuple(x.strip() for x in value.split(",") if x.strip())
+            consumed = True
+            i += 1
+        if consumed:
+            while i < len(lines) and lines[i].strip() == "":
+                i += 1
+        body = "\n".join(lines[i:]).strip()
+        return usage_mode, persons, terms, body
+
+    @staticmethod
+    def _extract_final_output(body: str) -> str:
+        marker = "最终输出\n\n"
+        sep = "\n\n原文\n\n"
+        if body.startswith(marker) and sep in body:
+            inner = body[len(marker):]
+            return inner[: inner.find(sep)].strip()
+        return body.strip()
+
     @staticmethod
     def _normalize_debug_audio_path(debug_audio_path: str | Path | None) -> str:
         if not debug_audio_path:
@@ -124,6 +211,10 @@ class HistoryStore:
             lines.append(f"ASR 语言: {metadata.asr_language}")
         if metadata.usage_mode == "translation" and metadata.translation_output_language:
             lines.append(f"目标语言: {metadata.translation_output_language}")
+        if metadata.matched_persons:
+            lines.append(f"人物: {', '.join(metadata.matched_persons)}")
+        if metadata.matched_terms:
+            lines.append(f"术语: {', '.join(metadata.matched_terms)}")
         if metadata.debug_audio_path:
             lines.append(f"调试音频: {metadata.debug_audio_path}")
         if not lines:
