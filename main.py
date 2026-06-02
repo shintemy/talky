@@ -439,7 +439,10 @@ def main() -> int:
         if s.usage_mode not in {"vibecoding", "translation"}:
             return
         apply_ollama_host_from_settings(s)
-        if run_preflight_check(required_model=s.ollama_model) == OllamaStatus.READY:
+        from talky.models import resolve_installed_model
+
+        resolved = resolve_installed_model(s.ollama_model)
+        if run_preflight_check(required_model=resolved) == OllamaStatus.READY:
             return
         activate_foreground_app()
         loc = detect_system_locale()
