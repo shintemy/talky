@@ -46,6 +46,28 @@ def label_for_hotkey_tokens(tokens: list[str]) -> str:
     return " + ".join(pretty)
 
 
+SECONDARY_CHORD: frozenset[str] = frozenset({"ctrl", "shift", "alt"})
+
+
+def evaluate(
+    conditions: list[set[str]],
+    current_mods: set[str],
+    prev_pressed: bool,
+) -> tuple[bool, bool, bool]:
+    """Pure trigger-state transition for a hold-to-talk listener.
+
+    `pressed` is True when ANY condition's required modifiers are all currently
+    held (OR semantics across conditions). Returns the edge events to fire so the
+    Quartz callback stays a thin wrapper.
+
+    Returns: (pressed, fire_press, fire_release)
+    """
+    pressed = any(cond <= current_mods for cond in conditions)
+    fire_press = pressed and not prev_pressed
+    fire_release = prev_pressed and not pressed
+    return pressed, fire_press, fire_release
+
+
 class HoldToTalkHotkey:
     """
     Press-and-hold hotkey handler.
