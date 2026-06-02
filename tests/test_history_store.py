@@ -158,6 +158,14 @@ def test_read_structured_entries_extracts_final_text_and_tags(tmp_path: Path) ->
     ]
 
 
+def test_read_structured_entries_keeps_final_text_starting_with_marker(tmp_path: Path) -> None:
+    store = HistoryStore(history_dir=tmp_path / "history")
+    # Final-only entry (no raw_text, e.g. cloud/edit path) whose text starts with 最终输出.
+    store.append("最终输出就是这句话", now=datetime(2026, 5, 25, 7, 0, 0))
+    entries = store.read_structured_entries("2026-05-25")
+    assert entries[0].final_text == "最终输出就是这句话"
+
+
 def test_read_structured_entries_handles_plain_daily_entry(tmp_path: Path) -> None:
     store = HistoryStore(history_dir=tmp_path / "history")
     store.append("纯文本无元数据", now=datetime(2026, 5, 25, 8, 0, 0))

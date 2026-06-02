@@ -178,13 +178,11 @@ class HistoryStore:
 
     @staticmethod
     def _extract_final_output(body: str) -> str:
-        marker = "最终输出"
-        if body.startswith(marker):
-            inner = body[len(marker):].lstrip("\n")
-            idx = inner.find("\n\n原文")
-            if idx >= 0:
-                inner = inner[:idx]
-            return inner.strip()
+        marker = "最终输出\n\n"
+        sep = "\n\n原文\n\n"
+        if body.startswith(marker) and sep in body:
+            inner = body[len(marker):]
+            return inner[: inner.find(sep)].strip()
         return body.strip()
 
     @staticmethod
