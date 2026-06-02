@@ -240,3 +240,61 @@ def test_global_shortcut_does_not_phantom_trigger_when_initially_held(
         None,
     )
     assert triggered == ["x"]
+
+
+def test_dual_trigger_or_semantics(monkeypatch: pytest.MonkeyPatch) -> None:
+    hotkey_mod, quartz_state = _reload_hotkey(monkeypatch)
+    q = sys.modules["Quartz"]
+    presses: list[str] = []
+    releases: list[str] = []
+    listener = hotkey_mod.HoldToTalkHotkey(
+        key_mode="fn",
+        custom_keys=[],
+        on_press=lambda: presses.append("p"),
+        on_release=lambda: releases.append("r"),
+    )
+    listener.start()
+    cb = quartz_state["callback"]
+    assert cb is not None
+
+    fn = q.kCGEventFlagMaskSecondaryFn
+    chord = (
+        q.kCGEventFlagMaskControl
+        | q.kCGEventFlagMaskShift
+        | q.kCGEventFlagMaskAlternate
+    )
+    flags_changed = q.kCGEventFlagsChanged
+
+    cb(None, flags_changed, fn, None)            # Fn down -> press
+    cb(None, flags_changed, fn | chord, None)    # add chord while holding Fn -> no 2nd press
+    cb(None, flags_changed, chord, None)         # release Fn, chord still held -> no release
+    cb(None, flags_changed, 0, None)             # release chord -> release
+
+    assert presses == ["p"]
+    assert releases == ["r"]
+
+
+def test_keypad_chord_triggers_alongside_fn_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hotkey_mod, quartz_state = _reload_hotkey(monkeypatch)
+    q = sys.modules["Quartz"]
+    presses: list[str] = []
+    releases: list[str] = []
+    listener = hotkey_mod.HoldToTalkHotkey(
+        key_mode="fn",
+        custom_keys=[],
+        on_press=lambda: presses.append("p"),
+        on_release=lambda: releases.append("r"),
+    )
+    listener.start()
+    cb = quartz_state["callback"]
+    chord = (
+        q.kCGEventFlagMaskControl
+        | q.kCGEventFlagMaskShift
+        | q.kCGEventFlagMaskAlternate
+    )
+    cb(None, q.kCGEventFlagsChanged, chord, None)  # chord down -> press (secondary cond)
+    cb(None, q.kCGEventFlagsChanged, 0, None)      # release -> release
+    assert presses == ["p"]
+    assert releases == ["r"]

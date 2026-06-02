@@ -47,3 +47,8 @@ def test_overlap_stays_pressed_when_one_of_two_releases() -> None:
         conditions, {"ctrl", "shift", "alt"}, True
     )
     assert (pressed, fire_press, fire_release) == (True, False, False)
+
+
+def test_empty_conditions_never_fires() -> None:
+    pressed, fire_press, fire_release = evaluate([], {"ctrl", "shift", "alt"}, False)
+    assert (pressed, fire_press, fire_release) == (False, False, False)

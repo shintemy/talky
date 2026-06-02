@@ -93,48 +93,46 @@ class HoldToTalkHotkey:
         self._run_loop = None
         self._tap = None
         self._using_fallback = False
-        self._required_modifiers: set[str] = set()
+        self._conditions: list[set[str]] = []
 
     @property
     def using_fallback(self) -> bool:
         return self._using_fallback
 
     def start(self) -> None:
-        self._required_modifiers = set()
         self._using_fallback = False
-        if self.key_mode == "fn":
-            started = self._start_fn_quartz_listener()
-            if started:
-                self._required_modifiers = {"fn"}
-                return
-            self._using_fallback = True
-            self._required_modifiers = {"alt"}
-            self._start_modifier_quartz_listener(required={"alt"})
-            return
+        primary = self._primary_condition()
+        self._conditions = [primary, set(SECONDARY_CHORD)]
+        self._start_quartz_listener(self._conditions)
 
+    def _primary_condition(self) -> set[str]:
+        """Resolve the user-configured primary hotkey into a required-modifier set."""
+        if self.key_mode == "fn":
+            if self._fn_mask_available():
+                return {"fn"}
+            # Standalone Fn unavailable on this OS build -> fall back to Right Option.
+            self._using_fallback = True
+            return {"alt"}
         if self.key_mode == "right_option":
-            self._required_modifiers = {"alt"}
-            self._start_modifier_quartz_listener(required={"alt"})
-            return
+            return {"alt"}
         if self.key_mode == "right_command":
-            self._required_modifiers = {"cmd"}
-            self._start_modifier_quartz_listener(required={"cmd"})
-            return
+            return {"cmd"}
         if self.key_mode == "command_option":
-            self._required_modifiers = {"cmd", "alt"}
-            self._start_modifier_quartz_listener(required={"cmd", "alt"})
-            return
+            return {"cmd", "alt"}
         if self.key_mode == "custom":
             supported = {"alt", "cmd", "ctrl", "shift", "fn"}
             required = {k for k in self.custom_keys if k in supported}
-            if not required:
-                required = {"alt"}
-            self._required_modifiers = required
-            self._start_modifier_quartz_listener(required=required)
-            return
+            return required or {"alt"}
+        return {"alt"}
 
-        self._required_modifiers = {"alt"}
-        self._start_modifier_quartz_listener(required={"alt"})
+    @staticmethod
+    def _fn_mask_available() -> bool:
+        try:
+            import Quartz
+
+            return getattr(Quartz, "kCGEventFlagMaskSecondaryFn", None) is not None
+        except Exception:
+            return False
 
     def stop(self) -> None:
         thread = self._quartz_thread
@@ -159,19 +157,19 @@ class HoldToTalkHotkey:
         _safe_join_thread(thread)
         self._quartz_thread = None
         self._pressed = False
-        self._required_modifiers = set()
+        self._conditions = []
 
     def is_pressed_now(self) -> bool:
         """Read current modifier state directly; fall back to last callback state."""
-        required = self._required_modifiers
-        if not required:
+        if not self._conditions:
             return self._pressed
         try:
             import Quartz
 
             source_state = getattr(Quartz, "kCGEventSourceStateCombinedSessionState", 0)
             flags = Quartz.CGEventSourceFlagsState(source_state)
-            return required.issubset(self._mods_from_flags(flags, Quartz))
+            current = self._mods_from_flags(flags, Quartz)
+            return any(cond <= current for cond in self._conditions)
         except Exception:
             return self._pressed
 
@@ -215,31 +213,25 @@ class HoldToTalkHotkey:
             mods.add("fn")
         return mods
 
-    def _start_modifier_quartz_listener(self, required: set[str]) -> None:
+    def _start_quartz_listener(self, conditions: list[set[str]]) -> None:
         try:
             import Quartz
             from CoreFoundation import CFRunLoopGetCurrent, CFRunLoopRun
         except Exception:
             return
 
-        alt_mask = getattr(Quartz, "kCGEventFlagMaskAlternate", 0)
-        cmd_mask = getattr(Quartz, "kCGEventFlagMaskCommand", 0)
-        ctrl_mask = getattr(Quartz, "kCGEventFlagMaskControl", 0)
-        shift_mask = getattr(Quartz, "kCGEventFlagMaskShift", 0)
-        fn_mask = getattr(Quartz, "kCGEventFlagMaskSecondaryFn", 0)
         tap_disabled_timeout = getattr(Quartz, "kCGEventTapDisabledByTimeout", None)
         tap_disabled_user_input = getattr(Quartz, "kCGEventTapDisabledByUserInput", None)
 
-        # Initialize pressed state from current global flags. This prevents
-        # phantom "pressed" transitions right after startup when modifier state
-        # is already active or stale across sleep/wake.
+        # Seed pressed state from current flags to avoid a startup false-positive
+        # when a modifier is already held (or stale across sleep/wake).
         try:
             source_state = getattr(Quartz, "kCGEventSourceStateCombinedSessionState", 0)
             current_flags = Quartz.CGEventSourceFlagsState(source_state)
         except Exception:
             current_flags = 0
         current_mods = self._mods_from_flags(current_flags, Quartz)
-        self._pressed = required.issubset(current_mods)
+        self._pressed = any(cond <= current_mods for cond in conditions)
 
         def _run_event_tap() -> None:
             tap_ref = {"tap": None}
@@ -259,13 +251,13 @@ class HoldToTalkHotkey:
 
                 flags = Quartz.CGEventGetFlags(event)
                 current = self._mods_from_flags(flags, Quartz)
-
-                is_match = required.issubset(current)
-                if is_match and not self._pressed:
-                    self._pressed = True
+                pressed, fire_press, fire_release = evaluate(
+                    conditions, current, self._pressed
+                )
+                self._pressed = pressed
+                if fire_press:
                     self.on_press()
-                elif not is_match and self._pressed:
-                    self._pressed = False
+                elif fire_release:
                     self.on_release()
                 return event
 
@@ -292,79 +284,6 @@ class HoldToTalkHotkey:
 
         self._quartz_thread = threading.Thread(target=_run_event_tap, daemon=True)
         self._quartz_thread.start()
-
-    def _start_fn_quartz_listener(self) -> bool:
-        try:
-            import Quartz
-            from CoreFoundation import CFRunLoopGetCurrent, CFRunLoopRun
-        except Exception:
-            return False
-
-        fn_mask = getattr(Quartz, "kCGEventFlagMaskSecondaryFn", None)
-        if fn_mask is None:
-            return False
-        tap_disabled_timeout = getattr(Quartz, "kCGEventTapDisabledByTimeout", None)
-        tap_disabled_user_input = getattr(Quartz, "kCGEventTapDisabledByUserInput", None)
-
-        # Seed pressed state from current flags to avoid startup false-positive.
-        try:
-            source_state = getattr(Quartz, "kCGEventSourceStateCombinedSessionState", 0)
-            current_flags = Quartz.CGEventSourceFlagsState(source_state)
-        except Exception:
-            current_flags = 0
-        self._pressed = bool(current_flags & fn_mask)
-
-        def _run_event_tap() -> None:
-            tap_ref = {"tap": None}
-
-            def _callback(proxy, event_type, event, refcon):
-                del proxy, refcon
-                if event_type in {tap_disabled_timeout, tap_disabled_user_input}:
-                    tap = tap_ref["tap"]
-                    if tap is not None:
-                        try:
-                            Quartz.CGEventTapEnable(tap, True)
-                        except Exception:
-                            pass
-                    return event
-                if event_type != Quartz.kCGEventFlagsChanged:
-                    return event
-                flags = Quartz.CGEventGetFlags(event)
-                is_pressed = bool(flags & fn_mask)
-                if is_pressed and not self._pressed:
-                    self._pressed = True
-                    self.on_press()
-                elif not is_pressed and self._pressed:
-                    self._pressed = False
-                    self.on_release()
-                return event
-
-            mask = Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged)
-            tap = Quartz.CGEventTapCreate(
-                Quartz.kCGSessionEventTap,
-                Quartz.kCGHeadInsertEventTap,
-                Quartz.kCGEventTapOptionListenOnly,
-                mask,
-                _callback,
-                None,
-            )
-            tap_ref["tap"] = tap
-            if tap is None:
-                self._using_fallback = True
-                self._start_modifier_quartz_listener(required={"alt"})
-                return
-            self._tap = tap
-
-            source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
-            run_loop = CFRunLoopGetCurrent()
-            self._run_loop = run_loop
-            Quartz.CFRunLoopAddSource(run_loop, source, Quartz.kCFRunLoopCommonModes)
-            Quartz.CGEventTapEnable(tap, True)
-            CFRunLoopRun()
-
-        self._quartz_thread = threading.Thread(target=_run_event_tap, daemon=True)
-        self._quartz_thread.start()
-        return True
 
 
 class GlobalShortcutListener:
