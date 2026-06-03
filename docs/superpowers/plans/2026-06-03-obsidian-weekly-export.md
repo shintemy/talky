@@ -702,8 +702,8 @@ git commit -m "feat: Configs tab Obsidian vault picker + export button"
 
 - [ ] **Step 1: Run the whole test suite**
 
-Run: `.venv/bin/python -m pytest -q`
-Expected: PASS — all existing tests + the new `tests/test_obsidian_export.py` and the two `test_config_store.py` cases. No failures.
+Run: `.venv/bin/python -m pytest tests/ -q` (MUST scope to `tests/` — running bare `pytest` from the repo root also collects packaged copies under `worktrees/` and `.worktrees/`, producing hundreds of spurious collection errors).
+Expected: PASS — all existing tests + the new `tests/test_obsidian_export.py` and the two `test_config_store.py` cases. Baseline before this feature: 295 passed, 3 xfailed.
 
 - [ ] **Step 2: Manual smoke test (human-flow, per spec §9)**
 
