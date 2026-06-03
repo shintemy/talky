@@ -33,6 +33,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QFileDialog,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -171,6 +172,16 @@ _ZH = {
     "speech_recognition": "语音识别",
     "text_output": "文本处理与输出",
     "app_preferences": "应用偏好",
+    "obsidian_sync": "Obsidian 同步",
+    "obsidian_choose": "选择 Vault…",
+    "obsidian_choose_title": "选择 Obsidian Vault 文件夹",
+    "obsidian_export": "导出周报到 Obsidian",
+    "obsidian_no_vault": "尚未选择 Vault",
+    "obsidian_need_vault": "请先选择你的 Obsidian Vault。",
+    "obsidian_vault_missing": "找不到 Vault 文件夹，请重新选择。",
+    "obsidian_nothing": "暂无周报可导出。",
+    "obsidian_done": "已导出 {n} 份，跳过 {m} 份（已存在）。",
+    "obsidian_failed": "失败：{names}",
     "target_language": "目标语言",
     "save_debug_audio": "保存调试录音",
     "debug_audio_max_files": "调试录音保留条数",
@@ -1667,6 +1678,22 @@ class ConfigsTab(QWidget):
             lambda _idx: self._schedule_quiet_auto_save()
         )
 
+        # ---- Obsidian sync ----
+        self._obsidian_vault_path = ""
+        self._obsidian_path_label = QLabel("")
+        self._obsidian_path_label.setObjectName("WindowSubtitle")
+        self._obsidian_path_label.setWordWrap(True)
+        self._obsidian_choose_button = QPushButton(
+            _tr(self._locale, "Choose Vault…", "obsidian_choose")
+        )
+        self._obsidian_choose_button.setObjectName("SecondaryButton")
+        self._obsidian_choose_button.clicked.connect(self._choose_obsidian_vault)
+        self._obsidian_export_button = QPushButton(
+            _tr(self._locale, "Export Weekly Reports to Obsidian", "obsidian_export")
+        )
+        self._obsidian_export_button.setObjectName("PrimaryButton")
+        self._obsidian_export_button.clicked.connect(self._export_to_obsidian)
+
         self.ui_locale_combo = StyledComboBox()
         self.ui_locale_combo.addItem(
             _tr(self._locale, "English", "ui_option_english"), userData="en"
@@ -1959,6 +1986,29 @@ class ConfigsTab(QWidget):
         app_layout.addLayout(app_form)
         content_layout.addWidget(self._app_section)
 
+        self._obsidian_section = QFrame()
+        self._obsidian_section.setObjectName("SectionFrame")
+        ob_layout = QVBoxLayout(self._obsidian_section)
+        ob_layout.setContentsMargins(16, 14, 16, 14)
+        ob_layout.setSpacing(10)
+        self._obsidian_card_title = QLabel(
+            _tr(self._locale, "Obsidian Sync", "obsidian_sync")
+        )
+        self._obsidian_card_title.setObjectName("CardTitle")
+        ob_layout.addWidget(self._obsidian_card_title)
+
+        ob_path_row = QHBoxLayout()
+        ob_path_row.setSpacing(8)
+        ob_path_row.addWidget(self._obsidian_choose_button)
+        ob_path_row.addWidget(self._obsidian_path_label, 1)
+        ob_layout.addLayout(ob_path_row)
+
+        ob_btn_row = QHBoxLayout()
+        ob_btn_row.addWidget(self._obsidian_export_button)
+        ob_btn_row.addStretch()
+        ob_layout.addLayout(ob_btn_row)
+        content_layout.addWidget(self._obsidian_section)
+
         content_layout.addStretch()
 
         reset_row = QHBoxLayout()
@@ -2049,6 +2099,8 @@ class ConfigsTab(QWidget):
         self.debug_audio_max_files_spin.setValue(int(settings.debug_audio_max_files))
         self._update_debug_audio_visibility()
         self._refresh_permission_status()
+        self._obsidian_vault_path = settings.obsidian_vault_path
+        self._refresh_obsidian_state()
         self._is_loading_settings = False
 
     def collect_settings(self) -> dict:
@@ -2092,7 +2144,64 @@ class ConfigsTab(QWidget):
             ),
             "auto_paste_delay_ms": 120,
             "llm_debug_stream": False,
+            "obsidian_vault_path": self._obsidian_vault_path,
         }
+
+    def _refresh_obsidian_state(self) -> None:
+        path = self._obsidian_vault_path.strip()
+        if path:
+            self._obsidian_path_label.setText(path)
+        else:
+            self._obsidian_path_label.setText(
+                _tr(self._locale, "No vault selected", "obsidian_no_vault")
+            )
+        self._obsidian_export_button.setEnabled(
+            bool(path) and Path(path).is_dir()
+        )
+
+    def _choose_obsidian_vault(self) -> None:
+        start_dir = self._obsidian_vault_path or str(Path.home())
+        chosen = QFileDialog.getExistingDirectory(
+            self,
+            _tr(self._locale, "Choose Obsidian Vault", "obsidian_choose_title"),
+            start_dir,
+        )
+        if not chosen:
+            return
+        self._obsidian_vault_path = chosen
+        self._refresh_obsidian_state()
+        self._save_settings(quiet=True)
+
+    def _export_to_obsidian(self) -> None:
+        result = self.controller.export_weekly_summaries_to_obsidian()
+        if result.error == "vault_not_set":
+            msg = _tr(
+                self._locale,
+                "Please choose your Obsidian vault first.",
+                "obsidian_need_vault",
+            )
+        elif result.error == "vault_missing":
+            msg = _tr(
+                self._locale,
+                "Vault folder not found. Please choose it again.",
+                "obsidian_vault_missing",
+            )
+        elif not result.exported and not result.skipped:
+            msg = _tr(
+                self._locale, "No weekly reports to export yet.", "obsidian_nothing"
+            )
+        else:
+            template = _tr(
+                self._locale,
+                "Exported {n}, skipped {m} (already present).",
+                "obsidian_done",
+            )
+            msg = template.format(n=len(result.exported), m=len(result.skipped))
+            if result.failed:
+                names = ", ".join(name for name, _ in result.failed)
+                failed_tpl = _tr(self._locale, "Failed: {names}", "obsidian_failed")
+                msg = msg + "\n" + failed_tpl.format(names=names)
+        QMessageBox.information(self, "Talky", msg)
 
     def _apply_locale_texts(self) -> None:
         self._usage_mode_title.setText(
@@ -2122,6 +2231,16 @@ class ConfigsTab(QWidget):
         self._app_card_title.setText(
             _tr(self._locale, "App Preferences", "app_preferences")
         )
+        self._obsidian_card_title.setText(
+            _tr(self._locale, "Obsidian Sync", "obsidian_sync")
+        )
+        self._obsidian_choose_button.setText(
+            _tr(self._locale, "Choose Vault…", "obsidian_choose")
+        )
+        self._obsidian_export_button.setText(
+            _tr(self._locale, "Export Weekly Reports to Obsidian", "obsidian_export")
+        )
+        self._refresh_obsidian_state()
         self.mic_permission_label.setText(
             _tr(self._locale, "Microphone", "mic_permission")
         )
@@ -2586,6 +2705,7 @@ class ConfigsTab(QWidget):
             custom_vibe_prompt=self.controller.settings.custom_vibe_prompt,
             usage_mode=usage_mode,
             translation_output_language=collected.get("translation_output_language", "en"),
+            obsidian_vault_path=collected.get("obsidian_vault_path", ""),
         )
         QTimer.singleShot(0, lambda s=settings, q=quiet: self._apply_settings_deferred(s, q))
 
