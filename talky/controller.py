@@ -67,6 +67,7 @@ from talky.weekly_summary import (
     previous_iso_week_range,
     run_weekly_summary,
 )
+from talky.obsidian_export import ExportResult, run_export
 
 if TYPE_CHECKING:
     from talky.asr_service import MlxWhisperASR
@@ -621,6 +622,10 @@ class AppController(QObject):
             append_debug_log("weekly summary worker failed", exc=exc)
         finally:
             self._weekly_summary_in_progress = False
+
+    def export_weekly_summaries_to_obsidian(self) -> ExportResult:
+        """Sync all weekly summaries into the configured Obsidian vault."""
+        return run_export(self.settings, self._summaries_dir)
 
     def _recover_stale_recording_after_wake(self) -> bool:
         append_debug_log("wake guard recovering stale recording after sleep/wake gap")
