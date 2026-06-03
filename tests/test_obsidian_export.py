@@ -126,10 +126,21 @@ def test_export_all_ignores_bad_filenames(tmp_path):
 
 
 def test_export_all_empty_dir(tmp_path):
+    summaries = tmp_path / "summaries"
+    summaries.mkdir()
     vault = tmp_path / "vault"
     vault.mkdir()
     result = export_all_summaries(
-        summaries_dir=tmp_path / "summaries", vault_path=vault, lang="en"
+        summaries_dir=summaries, vault_path=vault, lang="en"
+    )
+    assert result == ExportResult()
+
+
+def test_export_all_missing_summaries_dir(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    result = export_all_summaries(
+        summaries_dir=tmp_path / "does-not-exist", vault_path=vault, lang="en"
     )
     assert result == ExportResult()
 
