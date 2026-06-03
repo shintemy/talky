@@ -69,6 +69,7 @@ from talky.debug_log import append_debug_log
 from talky.error_report import append_error_report
 from talky.feature_flags import debug_ui_enabled
 from talky.version_checker import CURRENT_VERSION, VersionChecker
+from talky.obsidian_vault import detect_default_vault
 
 # ---------------------------------------------------------------------------
 # i18n
@@ -176,6 +177,9 @@ _ZH = {
     "obsidian_sync": "Obsidian 同步",
     "obsidian_choose": "选择 Vault…",
     "obsidian_choose_title": "选择 Obsidian Vault 文件夹",
+    "obsidian_detect": "从 Obsidian 检测",
+    "obsidian_detect_confirm_title": "确认 Obsidian Vault",
+    "obsidian_detect_none": "没找到 Obsidian 的 vault（请先在 Obsidian 里打开一个 vault）。",
     "obsidian_export": "导出周报到 Obsidian",
     "obsidian_no_vault": "尚未选择 Vault",
     "obsidian_need_vault": "请先选择你的 Obsidian Vault。",
@@ -1694,6 +1698,11 @@ class ConfigsTab(QWidget):
         )
         self._obsidian_choose_button.setObjectName("SecondaryButton")
         self._obsidian_choose_button.clicked.connect(self._choose_obsidian_vault)
+        self._obsidian_detect_button = QPushButton(
+            _tr(self._locale, "Detect from Obsidian", "obsidian_detect")
+        )
+        self._obsidian_detect_button.setObjectName("SecondaryButton")
+        self._obsidian_detect_button.clicked.connect(self._detect_obsidian_vault)
         self._obsidian_export_button = QPushButton(
             _tr(self._locale, "Export Weekly Reports to Obsidian", "obsidian_export")
         )
@@ -2006,6 +2015,7 @@ class ConfigsTab(QWidget):
         ob_path_row = QHBoxLayout()
         ob_path_row.setSpacing(8)
         ob_path_row.addWidget(self._obsidian_choose_button)
+        ob_path_row.addWidget(self._obsidian_detect_button)
         ob_path_row.addWidget(self._obsidian_path_label, 1)
         ob_layout.addLayout(ob_path_row)
 
@@ -2165,18 +2175,41 @@ class ConfigsTab(QWidget):
             bool(path) and Path(path).is_dir()
         )
 
-    def _choose_obsidian_vault(self) -> None:
-        start_dir = self._obsidian_vault_path or str(Path.home())
+    def _prompt_vault_dir(self, start_dir: str, title_en: str, title_key: str) -> None:
+        # Native panel only (no DontUseNativeDialog) so macOS powerbox grants
+        # access to the user-confirmed folder — required to write an iCloud vault.
         chosen = QFileDialog.getExistingDirectory(
-            self,
-            _tr(self._locale, "Choose Obsidian Vault", "obsidian_choose_title"),
-            start_dir,
+            self, _tr(self._locale, title_en, title_key), start_dir
         )
         if not chosen:
             return
         self._obsidian_vault_path = chosen
         self._refresh_obsidian_state()
         self._save_settings(quiet=True)
+
+    def _choose_obsidian_vault(self) -> None:
+        self._prompt_vault_dir(
+            self._obsidian_vault_path or str(Path.home()),
+            "Choose Obsidian Vault",
+            "obsidian_choose_title",
+        )
+
+    def _detect_obsidian_vault(self) -> None:
+        detected = detect_default_vault()
+        if not detected:
+            QMessageBox.information(
+                self,
+                "Talky",
+                _tr(
+                    self._locale,
+                    "Couldn't find an Obsidian vault. Open a vault in Obsidian first.",
+                    "obsidian_detect_none",
+                ),
+            )
+            return
+        self._prompt_vault_dir(
+            detected, "Confirm Obsidian Vault", "obsidian_detect_confirm_title"
+        )
 
     def _export_to_obsidian(self) -> None:
         result = self.controller.export_weekly_summaries_to_obsidian()
@@ -2242,6 +2275,9 @@ class ConfigsTab(QWidget):
         )
         self._obsidian_choose_button.setText(
             _tr(self._locale, "Choose Vault…", "obsidian_choose")
+        )
+        self._obsidian_detect_button.setText(
+            _tr(self._locale, "Detect from Obsidian", "obsidian_detect")
         )
         self._obsidian_export_button.setText(
             _tr(self._locale, "Export Weekly Reports to Obsidian", "obsidian_export")
