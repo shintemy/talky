@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import os
 import shlex
 import subprocess
@@ -452,6 +453,11 @@ QPushButton#PrimaryButton {
 
 QPushButton#PrimaryButton:hover {
     background: #F45B2F;
+}
+
+QPushButton#PrimaryButton:disabled {
+    background: #E5E5EA;
+    color: #AEAEB2;
 }
 
 QPushButton#SecondaryButton {
@@ -2683,8 +2689,11 @@ class ConfigsTab(QWidget):
                     self._mode_combo.setCurrentIndex(current_idx)
             return
 
-        settings = AppSettings(
-            custom_dictionary=self.controller.settings.custom_dictionary,
+        # Derive from the existing settings so fields the UI does not manage
+        # (e.g. runtime-mutated wake_guard counters, direct_whisper_output) are
+        # preserved instead of being reset to their dataclass defaults.
+        settings = dataclasses.replace(
+            self.controller.settings,
             hotkey=hotkey_mode,
             custom_hotkey=custom_hotkey,
             whisper_model=collected["whisper_model"],
@@ -2696,13 +2705,9 @@ class ConfigsTab(QWidget):
             language=collected["language"],
             auto_paste_delay_ms=collected["auto_paste_delay_ms"],
             llm_debug_stream=collected["llm_debug_stream"],
-            sample_rate=self.controller.settings.sample_rate,
-            channels=self.controller.settings.channels,
             mode=selected_mode,
             cloud_api_url=collected["cloud_api_url"],
             cloud_api_key=collected["cloud_api_key"],
-            custom_llm_prompt=self.controller.settings.custom_llm_prompt,
-            custom_vibe_prompt=self.controller.settings.custom_vibe_prompt,
             usage_mode=usage_mode,
             translation_output_language=collected.get("translation_output_language", "en"),
             obsidian_vault_path=collected.get("obsidian_vault_path", ""),
