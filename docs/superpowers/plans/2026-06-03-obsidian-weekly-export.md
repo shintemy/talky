@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-03-obsidian-weekly-export-design.md`
 
-**Test runner:** `.venv/bin/pytest` (a venv pytest exists at `.venv/bin/pytest`).
+**Test runner:** `.venv/bin/python -m pytest` — MUST use the `-m` form (run from the project root `/Users/sean/Documents/MyProject/talky`). The project has no `pyproject.toml`/`pytest.ini` and `talky` is not installed as a package, so the bare `.venv/bin/pytest` console script fails with `ModuleNotFoundError: No module named 'talky'`. The `python -m pytest` form puts the project root on `sys.path`.
 
 ---
 
@@ -98,7 +98,7 @@ def test_prepend_front_matter_skips_when_already_present():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/bin/pytest tests/test_obsidian_export.py -v`
+Run: `.venv/bin/python -m pytest tests/test_obsidian_export.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'talky.obsidian_export'`
 
 - [ ] **Step 3: Create the module with parsing + front-matter**
@@ -163,7 +163,7 @@ def prepend_front_matter(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `.venv/bin/pytest tests/test_obsidian_export.py -v`
+Run: `.venv/bin/python -m pytest tests/test_obsidian_export.py -v`
 Expected: PASS (7 passed)
 
 - [ ] **Step 5: Commit**
@@ -302,7 +302,7 @@ def test_run_export_happy_path_maps_locale(tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `.venv/bin/pytest tests/test_obsidian_export.py -v`
+Run: `.venv/bin/python -m pytest tests/test_obsidian_export.py -v`
 Expected: FAIL with `ImportError: cannot import name 'ExportResult'` (and `export_all_summaries`, `run_export`).
 
 - [ ] **Step 3: Add ExportResult, atomic write, export_all_summaries, run_export**
@@ -382,7 +382,7 @@ def run_export(settings, summaries_dir: Path) -> ExportResult:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `.venv/bin/pytest tests/test_obsidian_export.py -v`
+Run: `.venv/bin/python -m pytest tests/test_obsidian_export.py -v`
 Expected: PASS (15 passed)
 
 - [ ] **Step 5: Commit**
@@ -422,7 +422,7 @@ def test_obsidian_vault_path_defaults_empty():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.venv/bin/pytest tests/test_config_store.py -k obsidian -v`
+Run: `.venv/bin/python -m pytest tests/test_config_store.py -k obsidian -v`
 Expected: FAIL with `TypeError: __init__() got an unexpected keyword argument 'obsidian_vault_path'`
 
 - [ ] **Step 3: Add the field and from_dict line**
@@ -443,7 +443,7 @@ In `AppSettings.from_dict`, inside the `return cls(...)` call (after the `wake_g
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.venv/bin/pytest tests/test_config_store.py -k obsidian -v`
+Run: `.venv/bin/python -m pytest tests/test_config_store.py -k obsidian -v`
 Expected: PASS (2 passed)
 
 - [ ] **Step 5: Commit**
@@ -702,7 +702,7 @@ git commit -m "feat: Configs tab Obsidian vault picker + export button"
 
 - [ ] **Step 1: Run the whole test suite**
 
-Run: `.venv/bin/pytest -q`
+Run: `.venv/bin/python -m pytest -q`
 Expected: PASS — all existing tests + the new `tests/test_obsidian_export.py` and the two `test_config_store.py` cases. No failures.
 
 - [ ] **Step 2: Manual smoke test (human-flow, per spec §9)**
