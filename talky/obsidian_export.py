@@ -13,7 +13,10 @@ DEFAULT_SUBFOLDER = "Talky"
 
 
 def parse_summary_range(filename: str) -> tuple[date, date] | None:
-    """Parse 'summary-START_END.md' into (start, end); None if it does not match."""
+    """Parse 'summary-START_END.md' into (start, end); None if it does not match.
+
+    Expects a bare filename, not a full path.
+    """
     match = SUMMARY_RE.match(filename)
     if not match:
         return None

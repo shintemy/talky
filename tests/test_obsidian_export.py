@@ -36,8 +36,12 @@ def test_build_front_matter_zh():
 
 def test_build_front_matter_en():
     fm = build_front_matter(date(2026, 5, 25), date(2026, 5, 31), lang="en")
+    assert fm.startswith("---\n")
     assert 'title: "Weekly Report 2026-05-25 ~ 2026-05-31"' in fm
+    assert 'date_range: "2026-05-25/2026-05-31"' in fm
+    assert "date: 2026-05-31" in fm
     assert "tags: [Talky, weekly]" in fm
+    assert fm.endswith("---\n\n")
 
 
 def test_prepend_front_matter_adds_block():
