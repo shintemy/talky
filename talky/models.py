@@ -83,6 +83,7 @@ class AppSettings:
     wake_guard_gap_threshold_s: float = 20.0
     wake_guard_rebuild_count: int = 0
     wake_guard_suspected_false_positive_count: int = 0
+    obsidian_vault_path: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
@@ -128,6 +129,7 @@ class AppSettings:
             wake_guard_suspected_false_positive_count=int(
                 data.get("wake_guard_suspected_false_positive_count", 0)
             ),
+            obsidian_vault_path=str(data.get("obsidian_vault_path", "")),
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -116,3 +116,18 @@ def test_load_keeps_real_custom_prompt_untouched(tmp_path: Path) -> None:
 
     assert loaded.custom_llm_prompt == custom_prompt
     assert saved.get("custom_llm_prompt", None) == custom_prompt
+
+
+def test_obsidian_vault_path_round_trips():
+    from talky.models import AppSettings
+
+    s = AppSettings(obsidian_vault_path="/Users/me/Vault")
+    assert s.to_dict()["obsidian_vault_path"] == "/Users/me/Vault"
+    restored = AppSettings.from_dict(s.to_dict())
+    assert restored.obsidian_vault_path == "/Users/me/Vault"
+
+
+def test_obsidian_vault_path_defaults_empty():
+    from talky.models import AppSettings
+
+    assert AppSettings.from_dict({}).obsidian_vault_path == ""
